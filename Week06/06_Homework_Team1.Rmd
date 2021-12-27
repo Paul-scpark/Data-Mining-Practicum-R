@@ -1,0 +1,647 @@
+---
+title: "Practice6"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, out.width="100%")
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(tidyverse)
+library(lubridate)
+library(cowplot)
+library(proxy)
+library(cluster)
+library(fpc)
+library(dbscan)
+library(car)
+library(factoextra)
+```
+
+### 1. K-means algorithm
+```{r}
+k_means_algo <- function(df, x_col, y_col, k){
+  ### Euclidean distance
+  u_dist <- function(x1, y1, x2, y2){sqrt(((x2-x1)**2) + ((y2-y1)**2))}
+  
+  ### Initial setting
+  ndata <- nrow(df)
+  cents <- data.frame(cl = 1:k)
+  cents <- cbind(cents, df[sample(1:ndata, k), ])
+  df[, 'cl'] <- factor(rep(1, ndata), levels = 1:k)
+  
+  ### Append original data
+  output_list <- list()
+  output_list['df'] <- list(df)
+  output_list['cents'] <- list(cents)
+  
+  ### Algorithm
+  start <- 1
+  x <- deparse(substitute(x_col))
+  y <- deparse(substitute(y_col))
+  while (TRUE){
+    past <- mean(cents$x1) + mean(cents$x2)
+    for (row in 1:ndata){
+      ## 1. k개의 각 군집들과의 거리를 구해주기
+      for (k_value in 1:k){
+        col_name <- paste0('dist_', k_value)
+        if (row == 1){df[, col_name] <- 0} # 거리 계산 변수 만들기
+        ## 2. 모든 data point에 대해 각 군집들과 거리를 구하기
+        c_df <- cents %>% filter(cl == k_value)
+        df[row, col_name] <- u_dist(df[row, x], df[row, y], c_df[, x], c_df[, y])}
+      ## 3. 군집들과의 거리가 가장 짧은 곳으로 군집 재배치
+      target_df <- df %>% select(starts_with('dist_'))
+      df$cl[row] <- which.min(target_df[row, ])}
+    ## 4. 새롭게 배치된 군집들의 평균으로 군집들의 중심점 이동
+    cents <- df %>% 
+      group_by(cl) %>% 
+      summarise(x1 = mean(x1), x2 = mean(x2))
+    ## 5. centroid가 더 이상 변화하지 않는다면, STOP.
+    new <- mean(cents$x1) + mean(cents$x2)
+    if (new == past){break}
+    ## 6. 변화하는 데이터프레임 저장
+    name1 <- paste0('df', start)
+    name2 <- paste0('cents', start)
+    output_list[name1] <- list(df)
+    output_list[name2] <- list(cents)
+    start <- start + 1
+  }
+  
+  ### Find best model 
+  output_vector <- c()
+  start <- start - 1
+  for (i in 1:start){
+    name <- paste0('df', i)
+    final_df <- as.data.frame(output_list[name])
+    colnames(final_df) <- append(c('x1', 'x2', 'cl'), colnames(target_df))
+
+    output_vector[i] <- final_df %>% 
+      group_by(cl) %>% 
+      summarise(n = n()) %>% 
+      summarise(cal = max(n) - min(n)) %>% 
+      pull()
+  }
+  
+  ### Make plot by best model
+  best_num <- which.min(output_vector)
+  new_df <- as.data.frame(output_list[paste0('df', best_num)])
+  colnames(new_df) <- append(c('x1', 'x2', 'cl'), colnames(target_df))
+  new_cents <- as.data.frame(output_list[paste0('cents', best_num)])
+  colnames(new_cents) <- c('cl', 'x1', 'x2')
+  
+  ori <- output_list$df %>% 
+    ggplot(aes(x = x1, y = x2, col = cl)) +
+    geom_point(shape = 1) + theme_bw() +
+    geom_point(data = output_list$cents, shape = 4, col = 'red') + 
+    ggtitle('Plot of original data') + 
+    theme(plot.title = element_text(hjust=0.5))
+  
+  new <- new_df %>% 
+    ggplot(aes(x = x1, y = x2, col = cl)) +
+    geom_point(shape = 1) + theme_bw() + 
+    geom_point(data = new_cents, shape = 4, col = 'red') + 
+    ggtitle('Plot of best model data') + 
+    theme(plot.title = element_text(hjust=0.5))
+  
+  print(plot_grid(ori, new, nrow = 2))
+  return (new_df)
+}
+```
+
+K-means 알고리즘을 직접 코드로 구현해보도록 한다.
+
+이번에는 데이터부터 k까지를 모두 입력 받을 수 있도록 하는 k_means_algo 라는 함수를 만들어본다.
+
+input 파라미터는 데이터프레임, x와 y의 변수 이름, k로 총 4개를 받도록 한다.
+
+가장 먼저는 유클리디안 거리를 계산하는 함수를 정의해주고, 처음으로 중심점이 되는 k개 점을 랜덤으로 결정해준다.
+
+그리고 K-means 알고리즘이 작동하는 방식에 맞춰서 코드를 작성해주도록 한다. 큰 틀은 다음과 같다.
+
+1. 전체 프로세스를 반복해줄 수 있는 무한반복문 만들기
+2. 각 군집과 데이터들 사이에 거리를 구해주기
+3. 구해준 거리에 대해 가장 가까운 군집으로 매칭시키기
+4. 새롭게 구해준 군집에 대해 평균으로 중심점 조정하기
+5. 1~4번 과정을 반복하다가, 탈출할 수 있는 조건문 주기
+
+최종적으로는, 반복하면서 만들어진 데이터프레임을 저장하면서 군집이 가장 고르게 분배된 데이터를 결정하도록 한다.
+
+그리고 결과를 비교할 수 있도록 가장 처음 데이터와 최종적으로 군집화 된 데이터를 시각화 해본다.
+
+그러면, 기존에 파라미터 k를 준 것만큼 군집의 개수가 잘 나오는 것을 확인할 수 있다.
+
+```{r fig.height = 8}
+synth.data <- data.frame(x1 = c(rnorm(20, 3, 1.5), rnorm(20, 0, 1), rnorm(20, 5, 1)), 
+                         x2 = c(rnorm(20, 0, 1), rnorm(20, 4, 1), rnorm(20, 5, 1)))
+  
+output <- k_means_algo(synth.data, x1, x2, 3)
+table(output$cl)
+```
+
+### 2. k 값에 따른 CH Index와 WSS 그래프 표현
+```{r}
+set.seed(2018)
+path <- 'https://raw.githubusercontent.com/Paul-scpark/Data_Mining_Practicum/main/data/'
+protein <- read.table(paste0(path, 'protein.txt'), sep = '\t', header = T)
+var.to.use <- colnames(protein)[-1]
+pmatrix <- scale(protein[, var.to.use]) # Z 정규화
+
+total_df <- data.frame()
+for (k in 1:10){
+  pclusters <- kmeans(pmatrix, k)
+  
+  BSS_output <- pclusters$betweenss
+  WSS_output <- pclusters$tot.withinss
+  CH_output <- (BSS_output / (k-1)) / (WSS_output / (nrow(pmatrix) - k))
+  
+  total_df <- rbind(total_df, c(k, CH_output, WSS_output))
+}
+
+colnames(total_df) <- c('k', 'ch', 'wss')
+
+# Normalization
+total_df$ch <- ifelse(total_df$ch == -Inf, NA, total_df$ch)
+total_df$ch <- scale(total_df$ch)
+total_df$wss <- scale(total_df$wss)
+
+total_df %>% 
+  gather(measure, score, 2:3) %>% 
+  ggplot(aes(x = factor(k), y = score, fill = measure, group = 1)) +
+  geom_line(aes(color = measure)) + 
+  facet_grid(measure ~., scales = 'free_y') + 
+  xlab('k')
+```
+
+protein 데이터에 대하여 k가 1부터 10까지 변화할 때, ch index와 wss를 그래프로 표현해본다.
+
+for문을 통해 k가 1부터 10까지 변화함에 따라 kmeans 알고리즘의 output을 pclusters로 받아준다.
+
+그리고 ch index를 계산하기 위하여 BSS와 WSS를 pclusters의 파라미터로 받아주도록 한다.
+
+그 후, BSS는 k-1으로 나눠주고, WSS는 n-k로 나눠주도록 하여 최종적으로 Ch index를 계산한다.
+
+그 결과를 rbind를 통해서 total_df에 계속 누적해주도록 한다.
+
+최종적으로는 ggplot을 통해서 k 값에 따라 ch index와 wss를 그래프로 표현한다.
+
+WSS는 작고, ch index는 큰 것이 좋은 군집이므로, k가 5 정도에서 가장 좋다고 할 수 있겠다.
+
+### 3. 유클리디안 거리 외에 다양한 종류의 distance measure 조사하기
+
+군집 분석에 있어서 유사성을 측정하는 지표는 매우 중요하다고 할 수 있다.
+
+그 지표를 통해서 각 데이터가 유사한지 또는 유사하지 않는지를 알 수 있기 때문이다.
+
+따라서 가장 일반적으로 사용되는 유클리디안 거리 외에 다양한 종류의 거리 측정 방법을 확인해본다.
+
+#### (1) 유클리디안 거리
+
+```{r}
+u_dist <- function(x1, y1, x2, y2){ 
+  sqrt(((x2-x1)**2) + ((y2-y1)**2))
+}
+
+x <-rnorm(2)
+y <- rnorm(2)
+
+slope <- diff(y) / diff(x)
+intercept <- y[1] - slope*x[1]
+dist <- u_dist(x[1], y[1], x[2], y[2])
+
+plot(x, y, main = paste0('Euclidean distance = ', dist))
+abline(intercept, slope, col = 'red')
+```
+
+가장 일반적으로 거리를 구하는 공식은 유클리디안 거리이다.
+
+A점과 B점이 있다고 할 때, A와 B 점의 X좌표와 Y좌표를 뺀 값에 제곱을 취하고, 그 둘을 더해서 루트를 취한 값이다.
+
+피타고라스 정리를 생각하면 직관적으로 이해할 수 있을 것이고, 두 점을 잇는 최단거리임을 확인할 수 있다.
+
+유클리디안 거리는 k-means 알고리즘에서도 사용했던 것처럼 두 개의 점 사이에서 거리를 비교할 때 가장 많이 사용된다.
+
+유클리디안 거리는 두 점 자체에 대해 거리를 구하기 때문에 필요한 경우에는 정규화를 해줘야 한다.
+
+이 방식은 저차원 데이터가 있고, 벡터의 크기를 측정할 때 효과적이다. 따라서 k-means나 knn 알고리즘에서 유용하게 사용된다.
+
+#### (2) 맨하탄 거리
+
+```{r}
+m_dist <- function(x1, x2, y1, y2){
+  abs(x1 - x2) + abs(y1 - y2)
+}
+
+dist <- m_dist(x[1], y[1], x[2], y[2])
+
+plot(x, y, main = paste0('Manhattan distance = ', dist))
+abline(v = x[1], col = 'green')
+abline(h = y[2], col = 'green')
+```
+
+두번째 거리 계산 방식은 맨하탄 거리이다.
+
+이는 두 점 사이에 최단 거리를 대각선으로 가로 지르는 유클리디안 거리와 유사하다.
+
+다른 것은 두 점 사이에 장애물이 있다고 생각하는 것처럼 맨하탄 거리는 격자형 도로에서 이동하듯 계산된다.
+
+따라서 현실 세계에서는 유클리디안 거리보다는 현실 상황을 잘 고려한 거리 계산 방식으로 알려져있다.
+
+이를 계산하는 방식은 제곱해서 계산했던 유클리디안 거리와 다르게, 절댓값을 취해준다.
+
+맨하탄 거리는 유클리디안 거리보다 같거나 큰 범위의 값을 갖는다. 일반적으로, 유클리디안 거리 대신에 맨하탄 거리는 개체의 차원이 큰 군집 분석에서 많이 사용된다.
+
+또한 데이터에서 이산이나 이진 속성이 있는 경우에 현실적으로 고려할 수 있는 경로를 찾는 문제에서 잘 작동한다.
+
+#### (3) 코사인 거리
+
+```{r}
+doc_1 <- c(1, 5)
+doc_2 <- c(3, 4)
+doc_3 <- c(30, 40)
+
+doc_corpus <- rbind(doc_1, doc_2, doc_3)
+colnames(doc_corpus) <- c('life', 'love')
+
+doc_cosine <- as.matrix(dist(doc_corpus, method = 'cosine'))
+
+doc_cosine # 코사인 유사도
+1 - doc_cosine # 코사인 거리
+
+doc1_slope <- diff(c(doc_1[2], doc_2[2])) / diff(c(doc_1[1], doc_2[1]))
+doc1_intercept <- doc_1[2] - doc1_slope*doc_1[1]
+doc2_slope <- diff(c(doc_2[2], doc_3[2])) / diff(c(doc_2[1], doc_3[1]))
+doc2_intercept <- doc_2[2] - doc2_slope*doc_2[1]
+  
+plot(doc_corpus)
+abline(doc1_intercept, doc1_slope, col = 'red')
+abline(doc2_intercept, doc2_slope, col = 'blue')
+```
+
+세번째 거리 계산 방식은 코사인 거리이다. 이는 그 이름처럼 좌표 상에서 데이터들 간에 코사인 값을 의미한다.
+
+코사인 거리를 계산하는 방식은 1 - 코사인 유사도로 계산할 수 있고, 코사인 유사도는 proxy 패키지의 dist 함수에서 dist(method = 'cosine')으로 계산할 수 있다.
+
+코사인 거리는 두 개의 벡터의 사이에 각도를 구하여 유사도로 사용하는 것을 의미한다. 즉, 각도가 두 벡터 사이의 거리를 의미한다고 할 수 있다.
+
+유클리디안 거리에서는 거리가 가까울수록 유사하다고 정의했고, 코사인 거리에서는 각 데이터 사이에 각도가 작을수록 유사하다고 정의한다.
+
+코사인 유사도는 고차원 데이터이면서 벡터의 크기가 중요하지 않은 텍스트마이닝에서 많이 활용되는데, 검색어와 문서 사이에 유사도와 거리를 계산할 수 있다.
+
+한 문서에서 다른 문서보다 특정 단어가 자주 나온다고 해서 반드시 관련 있다고 이야기하기 어려운 것처럼, 크기보다 방향성을 중시한 거리 계산 방법이다.
+
+유클리디안 거리는 각 축의 숫자 범위에 크게 영향을 받으므로, 값의 절대적 크기를 고려하는 것은 유클리디안 거리이고, 상대적 크기를 고려하는 것은 코사인 거리다.
+
+이 방식은 고차원을 다루지 못하는 유클리디안 거리의 한계를 해결한 방법으로, 두 벡터 사이의 각도로 거리를 계산한다.
+
+위의 예시를 보면, life와 love 라는 단어를 가지고 있는 doc 1, 2, 3이 있는데, 각각에 대해서 코사인 유사도를 구해본다.
+
+결과를 보면, doc 1과 doc 2, doc 3의 코사인 거리는 약 0.9 정도라는 것을 확인할 수 있고, doc 2와 doc 3는 1이라는 것을 볼 수 있다.
+
+단순 두 점 사이의 거리를 보면, doc 2와 doc 3는 매우 멀지만, 코사인 거리 상으로는 1으로 가장 가깝다는 것을 알 수 있다.
+
+![](코사인거리.jpg)
+
+#### (4) 자카드 거리
+
+```{r}
+m <- matrix(c(0, 1, 1, 2, 3, 4), byrow = T, ncol = 2)
+m
+
+dist(m, method = 'Jaccard')
+```
+
+자카드 거리는 비교 대상의 두 개의 객체를 특징들의 집합으로 간주하는 방법으로 집합론에 기반을 둔 방법이다.
+
+자카드 거리를 구하는 방식은 1 - 자카드 지수이고, 자카드 지수를 구하는 방법은 다음과 같다.
+
+두 개의 집합 X, Y가 있다고 할 때, 두 집합의 교집합의 원소의 개수를 합집합의 원소의 개수로 나눈 값이고, 그 값의 범위는 0부터 1까지이다.
+
+자카드 거리와 지수를 사용하는 이유는 0이 많은 데이터에서 해당 부분을 의미있게 고려해 줄 수 있고, 두 집합의 사이즈가 달라도 가능하다.
+
+또한 중복의 여부가 중요하지 않을 때도 자카드 거리가 유용하게 사용될 수 있다.
+
+위의 예시에서 2개의 값을 가진 3개에 집합이 있을 때 자카드 거리를 계산하면, 1과 2와 1과 3은 겹치는 요소가 하나씩 있어서 0.5가 나오고, 2와 3은 0이 된다.
+
+![](자카드거리.jpeg)
+
+#### (5) 하버사인 거리
+
+하버사인 거리는 경도와 위도가 주어진 구의 두 점 사이의 거리라고 할 수 있다. 두 점 사이의 최단 거리를 구하는 점에서 유클리드 거리와 유사하다.
+
+하지만 가장 큰 차이점은 두 점이 구에 있다는 가정이 있으므로, 직선이 불가능하다는 것이다.
+
+하버사인 거리가 가장 많이 활용되는 방식은 위도와 경도 사이의 거리를 구할 때 사용된다. 구하는 방식은 다음과 같다.
+
+a = sin²(Δφ / 2) + cos φ₁ ⋅ cos φ₂ ⋅ sin²(Δλ / 2)
+
+c = 2 ⋅ atan2(√a, √(1−a))
+
+d = R ⋅ c
+
+- φ -> 주어진 위도
+- λ -> 주어진 경도
+- R -> 지구의 반지름(6371km)
+
+#### (6) Mahalanobis Distance
+
+```{r}
+air = airquality[c("Ozone" , "Temp")]
+air = na.omit(air)
+air.center = colMeans(air)
+air.cov = cov(air)
+
+rad  = qchisq(p = 0.95 , df = ncol(air))
+rad  = sqrt(rad)
+ellipse <- car::ellipse(center = air.center , shape = air.cov , radius = rad ,
+                        segments = 150 , draw = FALSE)
+
+ellipse <- as.data.frame(ellipse)
+colnames(ellipse) <- colnames(air)
+
+figure <- ggplot(air , aes(x = Ozone , y = Temp)) +
+    geom_point(size = 2) +
+    geom_polygon(data = ellipse , fill = "orange" , color = "orange" , alpha = 0.5)+
+    geom_point(aes(air.center[1] , air.center[2]) , size = 5 , color = "blue") +
+    geom_text( aes(label = row.names(air)) , hjust = 1 , vjust = -1.5 ,size = 2.5 ) +
+    ylab("Temp Values") + xlab("Ozone Values")
+
+figure
+```
+
+Mahalobis 같은 경우 분산(covariance)을 고려하여 거리를 구하는 것이다. 
+
+실제로 식은 euclidean distance에 covariance만 추가된 공식이다. 
+
+그림에 보이듯 주황색 원의 테두리를 Mahalobis는 같은 거리로 인식을 한다.
+
+#### (7) 그 밖에도 해밍거리, 체비쇼프 거리, 민코프 거리 등이 있다.
+
+!['다양한 거리 계산 방법에 대한 직관적 사진'](distance.png)
+
+### 4. DBSCAN 알고리즘 구현
+
+##### (1) 첫 번째로 구현한 알고리즘
+```{r}
+synth.data2 <- data.frame(x1 = c(runif(50, 1, 5), rnorm(50, 1, 0.5), 
+                                 rnorm(50, 5, 1.5), rnorm(50, 8, 0.2)), 
+                          x2 = c(rnorm(50, 3, 0.2), rnorm(50, -1, 0.5), 
+                                 rnorm(50, 1, 0.3), runif(50, -1, 3)))
+
+synth.data2 %>% 
+  ggplot(aes(x = x1, y = x2)) +
+  geom_point(shape = 1)
+```
+
+DBSCAN의 결과를 확인하기 위해서 임의의 데이터를 만들고, 그래프를 그려보도록 한다.
+
+```{r}
+Eps <- 0.5
+MinPts <- 5
+ClusterCount <- 1
+synth.data2$num <- rep(1:nrow(synth.data2))
+synth.data2$cl <- NA
+
+db <- dbscan(synth.data2[, 1:2], Eps, MinPts)
+dbscan_plot <- cbind(synth.data2, db$cluster) %>% 
+  ggplot(aes(x = x1, y = x2, col = factor(db$cluster))) + 
+  geom_point(shape = 1) + 
+  ggtitle('Output of DBSCAN package') + 
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+그리고 Epsilon 값을 0.5로, MinPts 값을 6으로 하는 DBSCAN 결과를 확인해보려고 한다.
+
+직접 구현한 알고리즘과 패키지의 결과를 확인하기 위해서 패키지의 그래프를 dbscan_plot에 미리 할당해둔다.
+
+```{r}
+for (p in 1:nrow(synth.data2)){
+  target <- synth.data2[p, ] # 임의로 시작점을 선택
+  
+  # 클러스터가 배정이 안된 경우에 실시
+  if (is.na(target$cl)){
+    # 시작점(target)으로부터 거리를 구해서, Epsilon 보다 작은 데이터만 추리기
+    target_df <- synth.data2 %>% 
+      mutate(dist = sqrt(((target$x1 - x1)**2) + ((target$x2 - x2)**2))) %>% 
+      filter(dist <= Eps)
+    # 추려진 데이터가 MinPts 개수보다 많은 경우
+    if (nrow(target_df) >= MinPts){
+      
+      # 새로운 점이 추가되지 않을 때까지, 계속 반복
+      # 처음으로 추린 데이터에 대하여 Eplison 범위 안에 점들을 계속해서 추가
+      while (TRUE){
+        ori <- nrow(target_df)
+        # 추려진 데이터(target_df)에 대해 계속해서 Eplison 범위 안에 점들 찾기
+        for (i in 1:nrow(target_df)){
+          target <- target_df[i, ]
+          new_df <- synth.data2 %>% 
+            mutate(dist = sqrt(((target$x1 - x1)**2) + ((target$x2 - x2)**2))) %>% 
+            filter(dist <= Eps)
+          target_df <- rbind(target_df, new_df)}
+        target_df <- target_df[!duplicated(target_df$num), ]
+        new <- nrow(target_df)
+        if (ori == new){break}} # for문 실행 전과 후의 데이터 개수가 동일하면, break
+      
+      # 추려진 데이터에 대해 이웃의 점 개수(neighbor) 구하기
+      row.names(target_df) <- NULL
+      for (i in 1:nrow(target_df)){
+        target <- target_df[i, ]
+        neighbor_df <- target_df %>% 
+          mutate(dist = sqrt(((target$x1 - x1)**2) + ((target$x2 - x2)**2))) %>% 
+          filter(dist <= Eps)
+        target_df[i, 'neighbor'] <- nrow(neighbor_df)}
+      
+      # 이웃의 점 개수가 MinPts 보다 큰 점들을 core point로 정의
+      # core point 점들에 대해서 Epsilon 범위 내에 모든 점을 같은 Cluster로 labeling
+      core_df <- target_df[target_df$neighbor >= MinPts, ]
+      row.names(core_df) <- NULL
+      for (i in 1:nrow(core_df)){
+        target <- core_df[i, ]
+        # Core point에 대해 Epsilon 범위 내에 점들을 같은 Cluster로 배정
+        final_df <- target_df %>% 
+          mutate(dist = sqrt(((target$x1 - x1)**2) + ((target$x2 - x2)**2))) %>% 
+          filter(dist <= Eps)
+        synth.data2[final_df$num, 'cl'] <- ClusterCount}
+    ClusterCount <- ClusterCount + 1} # Cluster 배정이 마무리되면, Cluster를 1 더해주기
+  }
+}
+```
+
+DBSCAN 알고리즘이 작동하는 순서는 다음과 같다.
+
+1. 임의의 한 점을 선택하여, 주어진 범위(Epsilon)에 해당하는 이웃 점 개수를 찾는다.
+2. 이웃의 점 개수가 MinPts 보다 크면, Core point로 정의한다.
+3. Core point는 아니지만, Core point의 범위 내에 있으면 Border point로 정의한다.
+4. Core point와 Border point는 같은 클러스터로 할당하고, 이외 것은 Noise point로 정의한다.
+5. 모든 점을 확인하면서, 클러스터를 생성해주도록 한다.
+
+이와 같은 작동 방식을 살려서 DBSCAN 알고리즘을 직접 구현해보았다.
+
+```{r}
+algo_plot <- synth.data2 %>% 
+  ggplot(aes(x = x1, y = x2, col = factor(cl))) +
+  geom_point(shape = 1) + 
+  ggtitle('Output of my own DBSCAN algorithm') + 
+  theme(plot.title = element_text(hjust=0.5))
+
+dbscan_plot
+algo_plot
+```
+
+직접 구현한 모델을 통해 나온 결과를 algo_plot에 저장해둔다.
+
+그리고 앞서 정의한 dbscan 패키지의 결과와 함꼐 그래프를 그려보면 그 결과가 비슷하게 나오는 것을 확인할 수 있다.
+
+##### (2) 두 번째로 구현한 알고리즘
+
+두번째로 구현한 알고리즘의 방식은 다음과 같다.
+
+1. visted column의 맨처음 값을 cluster 되지 않은 point를 의미하는 NA으로 설정하며, 최종적으로 어떤 cluster에도 속하지 않는 noise point는 NA로 남게 된다. boreder point는 False, core point는 TRUE를 의미하는 것으로 정한다.  
+2. cluster column을 생성하여 맨 처음 값을 0으로 설정한다. 
+3. 임의의 한 점을 선택하여, visted가 NA인 값에 대해 거리를 계산하여 주어진 범위(Epsilon) 안에 든 점의 개수가 Minpt 이상이면 corepoint로 지정한다. 
+4. 계산된 거리 리스트를 통해 current core point의 boreder point를 필터링하여 recursive 함수를 호출하여 3번 부터 4번까지 계속 반복한다.
+5. recursive가 끝나면 한 개의 클러스터가 생성된 상태이며, 그 다음으로 core, border point(visited가 TRUE or FALSE)지위의 row를 패스하고 클러스터링 시도를 계속 진행한다. cluster시도가 진행될 때마다 +1 하여 한 개의 클러스터에 포함되는 포인트들은 같은 cl 값을 저장하도록 했다. 
+
+
+```{r}
+# 유클리디안 거리 계산 함수
+u_dist <- function(u, v){
+  sqrt(sum((u-v)**2))
+}
+```
+
+```{r}
+#데이터 생성
+synth.data <- data.frame(x1 = c(rnorm(20, 3, 1.5), rnorm(20, 0, 1), rnorm(20,5,1)),
+                         x2 = c(rnorm(20, 0, 1), rnorm(20, 4, 1), rnorm(20, 5, 1)))
+
+ndata <- nrow(synth.data)
+ndim <- ncol(synth.data)
+
+synth.data %>% 
+  ggplot(aes(x = x1, y = x2)) +
+  geom_point(shape = 1)
+```
+
+```{r}
+#cl column은 각 오브젝트가 속하는 cluster를 나타내고, visted column는 한번도 코어포인트 확인 함수를 방문한 적이 없으면 NA(noise point를 의미), 방문은 했으나 코어포인트가 아니면 FALSE(border point를 의미), 방문을 하고 코어포인트 조건을 만족하면 TRUE(core point를 의미)
+synth.data$cl <- c(rep(0, ndata))
+synth.data$visited <- c(rep(NA, ndata))
+```
+
+```{r}
+#core point인지 확인하고  clustering해주는 함수 생성
+#core point의 radius 안에 있는 point에 대해서 반복하는 recursive 함수
+check_core <- function(i){
+  
+  # 함수를 실행하는 것은 corepoint인지 확인을 하는 것이므로 최소 borederpoint의 지위를 가지므로, borderpoint의 지위를 뜻하는 FALSE로 바꿔줌.
+  synth.data[i,4] <<- FALSE
+  
+  # core_point가 된 값을 center_x, y로 바꿔준다. 
+  center_x <<- synth.data[i,1]
+  center_y <<- synth.data[i,2]
+  
+  # visited가 NA인지의 여부를 나타내는 logical variable 리스트 저장 
+  logic_visited <<- is.na(synth.data$visited)
+  
+  # logic list 몇 번째 오브젝트가 NA인지 출력하는 which함수사용  -> which_na는 NA값을 가지는 row의 number를 저장하는 list
+  which_na <<- which(logic_visited, arr.ind = TRUE)
+  
+  # synth.data에서 NA값을 가지는 실제 데이터만 필터링
+  rows <<- synth.data[logic_visited,] 
+  
+  # NA 값에 속한 각 오브젝트에서 센터 값까지 거리를 구하고 Eps(radius)보다 작은 지 여부를 출력하는 list
+  logic_list<<-apply(rows[,1:2], 1, function(x){(u_dist(x, c(center_x, center_y)) <= Eps)
+  } 
+  )
+  # MinPts이상의 point가 거리 안에 있다면 그 point는 core poinrt라고 할 수 있으며, 다음 if문을 실행
+  if (sum(logic_list) >= MinPts){
+    # i번쨰 오브젝트의 visited를 TRUE로 변경, 군집을 형성하므로 cl변수도 저장
+    synth.data[i,4] <<- TRUE
+    synth.data[i,3] <<- cluster
+    
+    #logic list에서 Eps보다 작은  오브젝트의 Indices를 출력
+    which_isin <<- which(logic_list, arr.ind = TRUE)
+    
+    # core_point checking을 할 boreder point의 실제 row number를 찾기
+    # 거리를 쟀던 NA object를 담은 리스트 which_na에서 which_isin을 인덱싱하여 찾는다
+    next_i_to_check<<- which_na[which_isin]
+    
+    #centerpoint와 같은 cluster에 지정
+    synth.data[(next_i_to_check),]$cl <<- cluster
+    for (j in next_i_to_check){
+      check_core(j)
+    }
+  }
+}
+```
+
+```{r}
+# 한번 check_core를 부르면 recursive이기 때문에 해당 클러스터가 끝날 때 까지 진행된다. 그리고 코어포인트 checking함수를 거친 적없는 다른 object에 대해서도 클러스터 번호에 1을 더한 다음 다른 클러스터를 만들기 위한 과정이 진행된다.  
+visit_point <- function(){
+  cluster <<- 1
+  for (i in 1:ndata) {
+    # Core cluster의 판별되지 않은 그 다음 point에서 시작하여, remaining point를 대상으로 repeat.
+    if (is.na(synth.data[i,]$visited) == TRUE){
+      check_core(i)
+      cluster <<- cluster+1
+    }
+  }
+}
+```
+
+```{r}
+MinPts = 4
+Eps = 1.5
+visit_point()
+#여기서 factor가 0인 건 noisepoint이다
+synth.data %>% 
+  ggplot(aes(x = x1, y = x2, col = factor(cl))) + geom_point(alpha = 0.5, size = 1)
+```
+
+모든 점을 코어 포인트로 방문해야 함. Core cluster가 아니면 FALSE, Core cluster이면 TRUE, 한 개의의 클러스터가 끝나면 cl의 값을 올려서(다음 클러스터)로 넘어감 
+
+##### (3) DBSCAN 알고리즘에서 최적의 Epsilon 값 구하기
+
+```{r}
+set.seed(2018)
+synth.data2 <- data.frame(x1 = c(runif(50, 1, 5), 
+                                 rnorm(50, 1, 0.5), 
+                                 rnorm(50, 5, 1.5), 
+                                 rnorm(50, 8, 0.2)),
+                          x2 = c(rnorm(50, 3, 0.2), 
+                                 rnorm(50, -1, 0.5), 
+                                 rnorm(50, 1, 0.3), 
+                                 runif(50, -1, 3)))
+synth.data2 %>%
+    ggplot(aes(x1, x2)) +
+    geom_point()
+```
+
+```{r}
+synth.data2$cl <- rep(1:4, each = 50)
+synth.data2 %>%
+    ggplot(aes(x1, x2, col=factor(cl))) +
+    geom_point()
+```
+
+```{r}
+vars.to.use <- colnames(synth.data2)[-3]
+pmatrix2 <- scale(synth.data2[,vars.to.use])
+
+eps_plot <- kNNdistplot(synth.data2[,vars.to.use], k=3)
+eps_plot %>%
+    abline(h=0.6, lty = 2)
+```
+
+k의 값을 3으로 설정 할 때, 최적의 Epilson을 구하는 과정이다.
+
+```{r}
+d <- dbscan(synth.data2[,vars.to.use], eps = 0.6, MinPts =  3)
+d
+```
+
+```{r}
+fviz_cluster(d, synth.data2[,vars.to.use], geom = "point")
+```
+

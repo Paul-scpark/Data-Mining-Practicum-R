@@ -1,0 +1,428 @@
+---
+title: "Practice10"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(Metrics)
+library(caret)
+library(randomForest)
+```
+
+### 데이터 불러오기
+```{r fig.align='center'}
+path <- 'https://raw.githubusercontent.com/Paul-scpark/Data_Mining_Practicum/main/data/'
+ori_train <- read.csv(paste0(path, 'motion_train.csv'), header = T)
+test <- read.csv(paste0(path, 'motion_test.csv'), header = T)
+
+paste0('Size of train data: ', dim(ori_train))
+paste0('Size of test data: ', dim(test))
+
+table(ori_train$Activity)
+table(test$Activity)
+
+ori_train %>% 
+  group_by(Activity) %>% 
+  summarise(count = n()) %>% 
+  arrange(count) %>% 
+  ggplot(aes(x = reorder(Activity, -count), y = count)) +
+  geom_bar(stat = 'identity') + xlab('Activity') + 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) + 
+  geom_text(aes(label = count), vjust = 1.5, colour = 'white')
+```
+
+가장 먼저는 주어진 데이터를 불러오도록 한다. Kaggle에서 데이터를 다운 받은 후에 train과 test 데이터를 불러온다.
+
+각 데이터의 size를 먼저 확인해보면, train 데이터는 (7352, 563)이고, test 데이터는 (2947, 563) 이라는 것을 확인할 수 있다.
+
+두 데이터의 변수 개수가 같은 것으로 보아, train 데이터 뿐 아니라, test 데이터에서도 target 변수를 가지고 있음을 확인할 수 있다.
+
+Target 변수인 Activity 변수에 대해 train, test 각각에 대해 table로 전반적인 분포를 확인한다.
+
+그리고 직관적으로 이해할 수 있도록 bar plot을 통해서 Laying - Standing - Sitting - Walking - Walking Upstairs - Walking Downstairs 값을 확인한다.
+
+### 문제 1. train과 valid dataset으로 나눠서 Logistic regression 분류기 만들기 (Multi-class)
+```{r}
+sum(colSums(is.na(ori_train)))
+sum(colSums(is.na(test)))
+
+ori_train <- ori_train %>% 
+  transform(laying = ifelse(Activity == 'LAYING', 1, 0), 
+            sitting = ifelse(Activity == 'SITTING', 1, 0), 
+            standing = ifelse(Activity == 'STANDING', 1, 0), 
+            walking = ifelse(Activity == 'WALKING', 1, 0),
+            walking_down = ifelse(Activity == 'WALKING_DOWNSTAIRS', 1, 0), 
+            walking_up = ifelse(Activity == 'WALKING_UPSTAIRS', 1, 0))
+
+train_idx <- createDataPartition(ori_train$Activity, p = c(0.8, 0.2), list = F)
+train <- ori_train[train_idx, ]
+valid <- ori_train[-train_idx, ]
+
+dim(train)
+dim(valid)
+table(train$Activity) / nrow(train)
+table(valid$Activity) / nrow(valid)
+```
+
+가장 먼저는 모델링을 하기 전에 각 데이터에서 NA의 여부를 확인하여, NA가 없음을 확인한다.
+
+그 후에는 Target 변수인 Activity 변수에 대해 transform 함수를 통해 Dummy coding 처리를 해주도록 한다.
+
+그리고 나서는 train 데이터를 train과 valid dataset을 8:2 비율로 나눠서 모델의 성능을 파악하고, 반복하여 모델을 개선하도록 한다.
+
+이를 위해 caret 패키지의 createDataPartition 함수를 이용하는데, 그 이유는 target 변수들의 분포가 한쪽으로 치우치지 않고, 잘 분배된 상태로 나눠주기 때문이다.
+
+이를 통한 결과를 확인해보면, train과 valid 데이터셋에서 각 target 변수 별로 그 분포가 유사한 것을 확인할 수 있다.
+
+```{r}
+train_X <- train %>% 
+  select(-subject, -Activity, -laying, -sitting, -standing, -walking, -walking_down, -walking_up)
+train_y <- train %>% 
+  select(laying, sitting, standing, walking, walking_down, walking_up)
+
+valid_X <- valid %>% 
+  select(-subject, -Activity, -laying, -sitting, -standing, -walking, -walking_down, -walking_up)
+valid_y <- valid %>% 
+  select(laying, sitting, standing, walking, walking_down, walking_up)
+
+dim(train_X)
+dim(train_y)
+dim(valid_X)
+dim(valid_y)
+```
+
+그리고 나서는 학습을 위해 Input 변수와 Target(Label) 변수를 각각 train_X, train_y 형태로 나눠주도록 한다.
+
+이때, train 함수는 학습에 의미가 떨어지는 subject 변수부터 Label 변수를 제외해주도록 한다.
+
+또한 이를 train과 valid 데이터 각각으로 Input과 Label 데이터프레임을 나눠준다.
+
+```{r}
+model_list <- list()
+for (i in 1:6){
+  model_list[[colnames(train_y)[i]]] <- glm(data = cbind(train_y[i], train_X), 
+                                            formula = paste0(colnames(train_y)[i], '~.'), 
+                                            family = binomial(link = 'logit'))
+}
+
+names(model_list)
+```
+
+train과 valid 데이터셋이 준비되었다면, Logistic Regression 모델을 만들어보도록 한다.
+
+train 데이터의 Input 변수가 500개가 넘는 복잡한 모델이 되긴 하겠지만, 처음에는 일단 모든 변수를 넣고 모델링을 해보도록 한다.
+
+for 반복문을 통해서 각 변수를 분류하는 6개 모델을 각각 만들어서 list에 저장하도록 한다.
+
+학습이 끝난 후에 모델이 담겨 있는 model_list의 이름을 출력해보면, 6개 모델이 있는 것을 확인할 수 있다.
+
+```{r}
+valid_df <- data.frame(matrix("", nrow = nrow(valid_X)))[-1]
+for (model in names(model_list)){
+  valid_df <- cbind(valid_df, predict(model_list[model], newdata = valid_X, type = 'response'))
+}
+
+valid_df <- valid_df %>% 
+  mutate(pred = apply(valid_df, 1, which.max), 
+         pred = ifelse(pred == 1, 'LAYING', 
+                  ifelse(pred == 2, 'SITTING', 
+                    ifelse(pred == 3, 'STANDING', 
+                      ifelse(pred == 4, 'WALKING', 
+                        ifelse(pred == 5, 'WALKING_DOWNSTAIRS', 'WALKING_UPSTAIRS'))))),
+         actual = valid$Activity)
+
+head(valid_df, 10)
+```
+
+train 데이터를 이용해서 학습이 끝났다면, valid 데이터를 이용하여 성능을 평가해보도록 한다.
+
+각 row 별로 6개 모델을 이용한 예측 확률값을 담은 데이터프레임을 가장 먼저 만들어주도록 한다.
+
+그리고 나서는 확률값 중에서 가장 높은 값을 갖는 변수로 pred 변수를 만들어주고, 실제 값을 actual로 붙여주도록 한다.
+
+head 함수를 통해서 전반적인 형태를 확인하면, 위와 같음을 확인할 수 있다.
+
+```{r}
+table(valid_df$pred, valid_df$actual)
+mean(valid_df$pred == valid_df$actual)
+```
+
+train 데이터로 학습한 모델에 대하여 valid 데이터를 예측한 값에 대한 결과를 비교해본다.
+
+pred와 actual에 대해 table 함수를 통해서 confusion matrix 형태를 만들어서 결과를 본다.
+
+결과를 확인해보면, 약 0.95 정도의 결과를 확인할 수 있다.
+
+모델의 성능이 낮은 것은 아니지만, 500개 이상의 변수가 포함된 복잡한 모델이라고 할 수 있다.
+
+따라서 feature engineering을 통해 조금 단순화 시켜서 최적화를 시켜보도록 한다.
+
+### 문제 2. Feature Engineering을 통해서 모델을 최적화해보기
+```{r}
+# CASE 1. 각 Activity 별로 motion에 대한 Std 값이 큰 변수 확인
+train_sd <- train %>% 
+  select(-laying, -sitting, -standing, -walking, -walking_down, -walking_up) %>% 
+  group_by(Activity) %>% 
+  summarise_each(funs(sd))
+
+train_sd <- cbind(c('LAYING', 'SITTING', 'STANDING', 'WALKING', 'WALKING_DOWNSTAIRS', 'WALKING_UPSTAIRS', 'STD'), 
+                  rbind(train_sd[, -1], apply(train_sd[, -1], 2, sd)))
+
+colnames(train_sd)[1] <- 'variable'
+train_sd <- train_sd[, names(train_sd) != 'subject']
+train_sd <- as.data.frame(t(train_sd))
+colnames(train_sd) <- train_sd[1, ]
+train_sd <- train_sd[-1, ]
+train_sd$variable <- rownames(train_sd)
+train_sd[, 1:7] <- as.data.frame(sapply(train_sd[, 1:7], as.double))
+rownames(train_sd) <- NULL
+
+head(train_sd[order(train_sd$STD, decreasing = T), ], 5)
+head(train_sd[order(train_sd$STD, decreasing = F), ], 5)
+```
+
+이번에는 Feature Engineering 과정을 통해서 기존에 500개 이상의 변수를 사용했던 것을 조금 단순화 시켜보도록 한다.
+
+가장 먼저는 각 Activity 별로 group_by 해서 각 변수들의 값들의 변동이 심한 변수들을 통해 결과를 살펴보도록 한다.
+
+이를 통해 각 motion에 대한 변수들 중에서 기본적으로 움직임이 없는 즉, 모든 Activity에 대해서 변동성이 작은 변수는 기본 자세를 취하는 등으로 판단했다.
+
+따라서 laying, sitting, standing, walking, walking_up, walking_down의 행동에 대해 각 데이터의 Standard deviation을 구하도록 한다.
+
+이를 통해 다른 동작은 움직임이 적지만, 특정 동작에 있어서는 움직임이 크다고 판단되는 변수들의 지표로 표준편차를 사용하도록 한다.
+
+최종적으로 각 Activity 별로 표준편차를 계산하고, 그 후에는 각 variable 별로 표준편차를 계산하여 값이 큰 변수를 우선적으로 사용하도록 한다.
+
+```{r}
+summary(train_sd$STD)
+
+target_variable <- train_sd %>% 
+  filter(STD >= 0.13) %>% 
+  select(variable) %>% 
+  c()
+
+target_variable
+```
+
+각 변수 별로 계산된 표준편차를 summary 함수를 통해 전반적인 수치를 확인해본다. 
+
+결과를 확인해보면, max는 약 0.22, 3rd quantile은 약 0.10 정도가 나오는 것을 확인할 수 있다.
+
+이 과정에서는 기존 500개가 넘는 변수들에서 조금이나마 Input 변수를 줄이는 것이 목표이므로, 0.13 정도를 기준으로 filtering을 수행한다.
+
+이를 통해 target_variable은 25개가 나오는 것을 확인할 수 있다.
+
+```{r fig.align='center', fig.width=15, fig.height=15}
+var1 <- target_variable$variable[1:12]
+var2 <- target_variable$variable[13:24]
+
+train %>% 
+  select(var1, Activity) %>% 
+  gather(key, value, 1:12) %>% 
+  ggplot(aes(x = value, fill = Activity)) + 
+  geom_density(alpha = 0.2) + 
+  facet_wrap(~ key, scales = 'free_y')
+
+train %>% 
+  select(var2, Activity) %>% 
+  gather(key, value, 1:12) %>% 
+  ggplot(aes(x = value, fill = Activity)) + 
+  geom_density(alpha = 0.2) + 
+  facet_wrap(~ key, scales = 'free_y')
+```
+
+이 과정이 마무리 된 후에는 시각화를 통해서 전반적으로 변수 별로 분포의 차이가 있는지 결과를 확인해본다.
+
+총 25개 변수 중에서 12개씩 나눠서 2개의 plot을 그려보았다.
+
+표준편차가 크다는 것은 각 Activity 별로의 범위가 크다는 즉, 변동성이 크다는 것을 다시 한번 plot으로 확인할 수 있다.
+
+이 변수들을 통해 train 데이터로부터 모델링을하고, valid 데이터로 결과를 확인해보도록 한다.
+
+```{r}
+model_list <- list()
+for (i in 1:6){
+  model_list[[colnames(train_y)[i]]] <- glm(data = cbind(train_y[i], 
+                                                         train_X[, names(train_X) %in% target_variable$variable]), 
+                                            formula = paste0(colnames(train_y)[i], '~.'), 
+                                            family = binomial(link = 'logit'))
+}
+
+valid_df <- data.frame(matrix("", nrow = nrow(valid_X)))[-1]
+for (model in names(model_list)){
+  valid_df <- cbind(valid_df, predict(model_list[model], newdata = valid_X, type = 'response'))
+}
+
+valid_df <- valid_df %>% 
+  mutate(pred = apply(valid_df, 1, which.max), 
+         pred = ifelse(pred == 1, 'LAYING', 
+                  ifelse(pred == 2, 'SITTING', 
+                    ifelse(pred == 3, 'STANDING', 
+                      ifelse(pred == 4, 'WALKING', 
+                        ifelse(pred == 5, 'WALKING_DOWNSTAIRS', 'WALKING_UPSTAIRS'))))),
+         actual = valid$Activity)
+
+table(valid_df$pred, valid_df$actual)
+mean(valid_df$pred == valid_df$actual)
+```
+
+위와 같은 과정으로 표준편차가 컸던 상위 25개 변수들을 추린 target_variable을 활용하여 각 Activity를 예측할 수 있는 이진분류 모델을 만든다.
+
+그리고 valid 데이터를 이용하여 6개의 모델을 적용해서 가장 확률값이 컸던 Activity로 분류하도록 한다.
+
+이를 통해 최종적으로 valid 데이터셋에 있는 실제값과 예측값의 confusion matrix를 그려보도록 한다.
+
+그 후에는 실제와 예측이 일치한 것에 대해서 평균값을 계산해보면, 약 0.84 정도의 수치가 나오는 것을 볼 수 있다.
+
+1번에서 500개 이상의 변수를 넣었을 때보다는 확실히 결과값이 감소한 것을 확인할 수 있다.
+
+그렇다면, 다른 방식으로 feature engineering을 할 수 없을까 고민하다가, Random Forest를 활용해 보기로 했다.
+
+```{r fig.align='center', fig.width=15, fig.height=15}
+# CASE 2. Random Forest 알고리즘을 통해 Feature Importance 확인
+new_train <- train[, !names(train) %in% c('subject', 'laying', 'sitting', 
+                                          'standing', 'walking', 'walking_down', 'walking_up')]
+new_train$Activity <- as.factor(new_train$Activity)
+rf_model <- randomForest(new_train$Activity ~ ., data = new_train, )
+varImpPlot(rf_model)
+```
+
+앞서 이야기했듯, 1번에서의 모델링을 약 500개가 넘는 너무 많은 변수로 학습시킨 모델이라고 할 수 있다.
+
+500차원이 넘어가는 모델은 너무 복잡도가 크기 때문에 Feature selection 과정이 필요하다.
+
+이를 위해서 시도해본 것은 Random Forest 알고리즘의 Feature Importance를 확인하는 것이었다.
+
+Random Forest 알고리즘은 gini-index 값을 기준으로 각 변수의 중요도를 계산해줄 수 있다.
+
+따라서 이를 plot을 통해서 결과를 확인해보면, 위와 같음을 확인할 수 있다.
+
+결과를 보면, tGravityAcc.min, tGravityAcc.mean, angly.Y.gravityMean, tGravityAcc.max 등의 변수들이 중요도가 높은 것으로 확인된다.
+
+```{r}
+rf_importance <- as.data.frame(rf_model$importance)
+rf_importance$variable <- rownames(rf_importance)
+rf_importance <- rf_importance[order(rf_importance$MeanDecreaseGini),]
+input_variable <- tail(rf_importance$variable, 30)
+input_variable
+```
+
+따라서 중요도가 높은 변수들을 내림차순으로 정렬하여 Target 변수에 영향을 많이 미치는 30 변수를 채택하도록 한다.
+
+이 역시 해당 변수들을 추려서 시각화를 통해서 전반적인 분포가 어떻게 생겼는지 확인해보도록 한다.
+
+```{r fig.align='center', fig.width=15, fig.height=15}
+var1 <- input_variable[1:12]
+var2 <- input_variable[13:24]
+
+train %>% 
+  select(var1, Activity) %>% 
+  gather(key, value, 1:12) %>% 
+  ggplot(aes(x = value, fill = Activity)) + 
+  geom_density(alpha = 0.2) + 
+  facet_wrap(~ key, scales = 'free_y')
+
+train %>% 
+  select(var2, Activity) %>% 
+  gather(key, value, 1:12) %>% 
+  ggplot(aes(x = value, fill = Activity)) + 
+  geom_density(alpha = 0.2) + 
+  facet_wrap(~ key, scales = 'free_y')
+```
+
+앞선 plot과 유사하게 Activity와 변수 별로 전반적인 분포를 위와 같이 확인할 수 있다.
+
+그리고 나서는 기존 500개 이상의 변수에서 30개로 줄인 변수를 통해서 다시 모델링을 수행해보고, 결과를 확인하도록 한다.
+
+```{r}
+model_list <- list()
+for (i in 1:6){
+  model_list[[colnames(train_y)[i]]] <- glm(data=cbind(train_y[i],train_X[,names(train_X) %in% input_variable]), 
+                                            formula = paste0(colnames(train_y)[i], '~.'), 
+                                            family = binomial(link = 'logit'))
+}
+
+valid_df <- data.frame(matrix("", nrow = nrow(valid_X)))[-1]
+for (model in names(model_list)){
+  valid_df <- cbind(valid_df, predict(model_list[model], newdata = valid_X, type = 'response'))
+}
+
+valid_df <- valid_df %>% 
+  mutate(pred = apply(valid_df, 1, which.max), 
+         pred = ifelse(pred == 1, 'LAYING', 
+                  ifelse(pred == 2, 'SITTING', 
+                    ifelse(pred == 3, 'STANDING', 
+                      ifelse(pred == 4, 'WALKING', 
+                        ifelse(pred == 5, 'WALKING_DOWNSTAIRS', 'WALKING_UPSTAIRS'))))),
+         actual = valid$Activity)
+
+table(valid_df$pred, valid_df$actual)
+mean(valid_df$pred == valid_df$actual)
+```
+
+채택된 30개 변수를 추린 후에는 앞선 과정과 동일하게 6개 target 변수에 대해 분류 가능한 모델을 학습하여 list에 할당한다.
+
+그리고나서는 valid 데이터셋에 대해 모델을 적용하여 결과를 비교 및 평가해보도록 한다.
+
+최종적으로 결과를 확인해보면, 약 0.93 정도의 값이 나오는 것을 확인할 수 있다.
+
+모든 변수를 다 넣었던 1번에서는 정확도가 완벽한 1이 나왔는데, 확실히 변수를 줄이니 그 결과 역시 소폭 감소함을 확인할 수 있다.
+
+첫번째로 확인했던 단순히 표준편차로만 비교했던 것보다는 결과가 소폭 상승한 것을 확인할 수 있었고, 이를 통해 최종 모델을 만들어보도록 한다.
+
+### 문제 3. Feature Engineering 후, test 데이터에 모델 적용해보기
+```{r}
+final_train_X <- ori_train %>% 
+  select(-subject, -Activity, -laying, -sitting, -standing, -walking, -walking_down, -walking_up)
+final_train_y <- ori_train %>% 
+  select(laying, sitting, standing, walking, walking_down, walking_up)
+
+dim(final_train_X)
+dim(final_train_y)
+```
+
+최종 모델에서는 기존에 train과 valid를 나눴던 것을 모두 합쳐서 모델링을 하도록 한다.
+
+2번 과정에서 결과를 보면, Random Forest의 변수 중요도로부터 결과를 비교한 것이 valid 데이터에서 결과가 더 좋았다.
+
+따라서 해당 변수들을 통해서 최종 모델링을 수행하여 test 데이터에서 결과를 비교해보도록 한다.
+
+```{r}
+model_list <- list()
+for (i in 1:6){
+  model_list[[colnames(final_train_y)[i]]] <- glm(data=cbind(final_train_y[i],
+                                                             final_train_X[,names(final_train_X) %in% input_variable]), 
+                                                  formula = paste0(colnames(final_train_y)[i], '~.'), 
+                                                  family = binomial(link = 'logit'))
+}
+
+test_df <- data.frame(matrix("", nrow = nrow(test)))[-1]
+for (model in names(model_list)){
+  test_df <- cbind(test_df, predict(model_list[model], newdata = test[, names(test) %in% input_variable], type = 'response'))
+}
+
+test_df <- test_df %>% 
+  mutate(pred = apply(test_df, 1, which.max), 
+         pred = ifelse(pred == 1, 'LAYING', 
+                  ifelse(pred == 2, 'SITTING', 
+                    ifelse(pred == 3, 'STANDING', 
+                      ifelse(pred == 4, 'WALKING', 
+                        ifelse(pred == 5, 'WALKING_DOWNSTAIRS', 'WALKING_UPSTAIRS'))))),
+         actual = test$Activity)
+
+table(test_df$pred, test_df$actual)
+mean(test_df$pred == test_df$actual)
+```
+
+최종적인 final_train 데이터에 대해서 약 25개 정도로 추린 input_variable로 최종 Logistic 모델을 만들어서 list에 담는다.
+
+그리고 나서, test 데이터에 대해 각 모델들을 활용하여 가장 확률이 높았던 Activity를 분류하도록 한다.
+
+마지막으로는 위에서 했던 과정과 유사하게, 예측값과 실제값의 결과를 비교해보도록 한다.
+
+최종적인 결과는 기존 500개가 넘는 변수에서 30개를 사용하여 약 0.87 정도가 나오는 것을 확인할 수 있다.

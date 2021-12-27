@@ -1,0 +1,461 @@
+---
+title: "Practice 4 (Team 1)"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, 
+                      out.width="100%", root.dir = './Desktop/Data_Mining_Practicum/HW/NIV_English_Bible/')
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(tidytext)
+library(janeaustenr)
+library(gutenbergr)
+library(scales)
+library(textdata)
+library(wordcloud)
+library(reshape2)
+library(topicmodels)
+library(wordcloud2)
+library(ggrepel)
+theme_set(theme_grey(base_family='NanumGothic'))
+options("scipen" = 1000)
+```
+
+### 1-1. Loading data
+```{r}
+file_lists <- list.files(getwd(), pattern = "*.txt")
+file_lists
+```
+
+폴더 안에 있는 여러 파일들을 불러와야 하므로, 경로와 파일들의 이름들을 벡터로 만들어둔다.
+
+그리고 향후에 paste0 함수와 for 문을 통해서 반복해서 데이터를 불러올 수 있도록 한다.
+
+```{r}
+bible <- data_frame()
+for (book in file_lists){
+  df <- read.table(paste0(book), sep = '\n', header = T, quote = '')
+  title <- colnames(df)
+  
+  df <- df %>% 
+    separate(title, c('Chapter', 'Verse'), ':', extra = 'merge') %>% 
+    separate(Verse, c('Verse', 'Script'), '\\s', extra = 'merge') %>% 
+    mutate(Book = title)
+  
+  bible <- bind_rows(bible, df)
+}
+
+bible <- bible[, c('Book', 'Chapter', 'Verse', 'Script')]
+unique(bible$Book)
+bible
+```
+
+성경 66권이 담긴 txt 파일들을 읽어서 bind_rows 함수를 통해서 하나의 데이터프레임으로 만들어준다.
+
+최종적으로 unique 함수를 통해서 66권의 성경들이 잘 들어갔는지 확인한다.
+
+또한 행과 열의 개수를 확인해보면, (31038, 4) 라는 것을 알 수 있다.
+
+```{r}
+colSums(is.na(bible))
+bible[is.na(bible$Script), ]
+```
+
+그렇다면, 부른 데이터에 NA가 있는지를 확인해봤더니 Script 변수에 11개의 NA가 있음을 확인하여 이를 출력해보았다.
+
+그래서 마태복음, 마가복음, 누가복음, 요한복음에 대해 실제 성경을 찾아보니 원래 비어있음을 확인할 수 있었다.
+
+### 1-2. Tokenizations, Frequency analysis, Visualization
+```{r}
+tidy_bible <- tidy_bible <- bible %>% 
+  unnest_tokens(word, Script) %>% 
+  anti_join(stop_words) %>% 
+  filter(grepl("[A-za-z]", word)) %>% 
+  mutate(word = gsub("'s", '', word))
+
+tidy_bible
+```
+
+가장 먼저는 Tokenizations과 빈도 분석을 수행해보려고 한다.
+
+그 전에 stopwords를 불러오고, unnest_tokens 함수로 Tokenizations을 수행한다.
+
+anti_join을 통해 stopwords를 제거한 후, 단어 단위로 토큰화 된 것을 확인할 수 있다.
+
+이때 확인해보니, 숫자로 이루어진 단어들도 많이 있어서 정규표현식으로 숫자는 제거해주도록 한다.
+
+또한 어퍼스트로피 s 역시, 분석에 있어서 굳이 큰 의미가 없으므로 삭제해주도록 한다.
+
+```{r}
+bible_word <- tidy_bible %>% 
+                count(word, sort = T)
+
+head(bible_word, 10)
+```
+
+토큰화된 결과에 대하여 성경 전체에서 가장 많이 사용된 단어가 무엇인지 확인해보도록 한다.
+
+그 결과를 보면, lord, god, son, king, people, israel 등의 단어가 많이 나오는 것을 볼 수 있다.
+
+성경 자체가 삼위일체 하나님에 대해 표현하는 부분이 많기 때문에 이런 결과가 나온 것으로 생각된다.
+
+```{r}
+old <- unique(tidy_bible$Book)[1:39]
+new <- unique(tidy_bible$Book)[40:66]
+
+tidy_bible %>% 
+  count(Book, word) %>% 
+  group_by(Book) %>% 
+  mutate(proportion = n / sum(n)) %>% 
+  select(-n) %>% 
+  filter(word %in% head(bible_word$word, 4)) %>% 
+  spread(Book, proportion) %>% 
+  replace(is.na(.), 0) %>% 
+  melt(id = 'word') %>% 
+  mutate(label = ifelse(variable %in% old, 'old', 'new')) %>% 
+  ggplot(aes(x = variable, y = value, group = word)) +
+  geom_line(aes(color = word)) + 
+  facet_grid(rows = vars(label)) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1), 
+        axis.text = element_text(size = 6)) + 
+  xlab(NULL) + ylab(NULL)
+```
+
+이번에는 성경 전체에서 가장 많이 나온 상위 4개 단어 god, king, lord, son이 어디서 얼마나 나왔는지 확인해보도록 한다.
+
+각 Book 별로 단어들의 개수를 구하고, 그 비율을 구해준 후에 상위 4개 단어에 대한 시각화를 해본다.
+
+성경 전체를 통틀어서 가장 많이 나온 'lord' 라는 단어는 상대적으로 신약에서 많이 나온 것을 볼 수 있다.
+
+반면, 두번째로 많이 나온 'god' 이라는 단어는 신약보다 구약에서 많이 등장했다.
+
+```{r}
+bible_word %>% 
+  filter(n > 1000) %>% 
+  mutate(word = reorder(word, n)) %>% 
+  ggplot(aes(x = word, y = n)) +
+  geom_col() + xlab(NULL) + ylab(NULL) +
+  coord_flip()
+```
+
+그 다음으로는 1,000번 이상 나온 단어를 barplot 형태로 시각화를 만들어보았다.
+
+위에서 이야기했던 것처럼 lord, god, son, king 등의 단어 빈도수가 많은 것을 볼 수 있다.
+
+그렇다면, 워드클라우드로 시각화를 표현하면 어떻게 되는지 알아보자.
+
+```{r fig1, fig.height=5, fig.width=5, fig.align='center'}
+wordcloud2(bible_word)
+```
+
+위와 같은 워드클라우드로 표현하면, 조금 더 직관적으로 결과를 확인할 수 있다.
+
+### 2-1. New, Old - Frequency analysis, frequent words
+```{r}
+tidy_bible <- tidy_bible %>% 
+  mutate(label = ifelse(Book %in% old, 'old', 'new'))
+
+tidy_bible %>% 
+  count(word, label, sort = T) %>% 
+  group_by(label) %>% 
+  top_n(20) %>%
+  ungroup() %>%
+  mutate(Testament = as.factor(label),
+         word = reorder_within(word, n, label)) %>% 
+  ggplot(aes(x = word, y = n, fill = label)) +
+  geom_col(show.legend = F) +
+  facet_wrap(~label, scales = 'free_y') +
+  coord_flip() + xlab(NULL) + ylab(NULL)
+```
+
+위에서 만들어 놓았던 구약과 신약의 구분 벡터를 바탕으로 label 변수를 만들어준다.
+
+그리고 구약과 신약 각각에 대해서 상위 20개 단어들을 찾아서 각각 그래프로 표현해본다.
+
+이 결과를 통해서 상대적으로 신약에 비해 구약에서 같은 단어가 많이 반복되는 것을 알 수 있다.
+
+나오는 단어들을 보면, 구약은 israel, jerusalem, judah 등과 같이 특정한 장소나, 인물에 대한 단어가 많이 나오는 것을 볼 수 있다.
+
+반면, 신약은 예수님에 대한 믿음과 사랑에 대한 이야기로 jesus, god, lord, love 등의 단어가 나오는 것을 볼 수 있다.
+
+```{r}
+tidy_bible %>% 
+  count(word, label, sort = T) %>% 
+  acast(word ~ label, value.var = 'n', fill = 0) %>% 
+  comparison.cloud(colors = c('darkred', 'darkcyan'), 
+                   max.words = 300)
+```
+
+한편, 앞서 1번에서의 워드클라우드는 구약과 신약을 모두 합쳐서 성경 전체에 대한 워드클라우드였다.
+
+이번에는 구약과 신약을 나눠서 각각에 대한 빈도 수가 높은 단어들에 대해 워드클라우드를 만들어본다.
+
+구약에서 많이 사용된 단어는 lord, god, king, son 등으로 성경 전체의 결과와 유사하다.
+
+신약에서 많이 사용된 단어는 jesus, god, lord, christ, son, people 등이었다.
+
+### 2-2. Additional stopwords
+일반적으로 Text Mining 과정에서 분석에 의미가 없는 단어들이 나오는 경우가 있다.
+
+예를들면, be동사나 전치사, the, a, an과 같은 단어가 그러하다.
+
+따라서 이러한 단어를 가지고 있는 data(stop_words)를 통해서 기본적으로 추리고, 추가적인 stopwords를 확인하도록 한다.
+
+앞선 1번과 2번 작업에서 제거했던 stopwords는 분석에 의미가 떨어지는 숫자를 제거했다.
+
+또한 "'s" 즉, 어퍼스트로피 s 역시 그 앞에 나오는 단어가 더 중요하다고 생각이 되어 제거하도록 했다.
+
+### 2-3. Word appearance in both New and Old Testament
+```{r}
+new_old_word <- tidy_bible %>% 
+  count(word, label, sort = T) %>% 
+  group_by(word) %>% 
+  filter(n() == 2 & n >= 10) %>% 
+  filter(n() == 2) %>% 
+  left_join(bible_word, by = 'word') %>% 
+  mutate(prop = n.x / n.y) %>% 
+  arrange(word)
+
+head(new_old_word)
+```
+
+신약과 구약 모두에서 10회 이상 나타나는 단어와 그 비율들을 계산하려고 한다.
+
+이를 위해서 word를 기반으로 group_by 하여 합이 2개 이면서 단어의 수가 10개 이상인 것들만 filter 하도록 한다.
+
+그런 후에는 성경 전체의 단어와 빈도 수를 담고 있는 bible_word 데이터와 join 해주도록 한다.
+
+그 후에는 구약과 신약 각각에 대하여 전체에 대한 비율을 계산하여 prop 이라는 새로운 변수를 만들어주고, 위와 같이 결과를 확인할 수 있다.
+
+```{r}
+new_old_word <- new_old_word %>% 
+  select(-n.x, -n.y) %>% 
+  spread(label, prop) %>% 
+  rename(prop_A_new = new, prop_B_old = old) %>% 
+  mutate(log_ratio = log(prop_A_new / prop_B_old)) %>% 
+  arrange(desc(log_ratio))
+
+head(new_old_word)
+```
+
+위의 데이터는 word 라는 변수에 같은 단어가 두번씩 들어가고 있으므로, 구약과 신약을 각각 새로운 열로 하는 데이터프레임을 만든다.
+
+이를 위해 label을 key로 하고, prop을 value로 하여 spread 함수로 결과를 확인할 수 있다.
+
+또한 신약을 prop_A_new로, 구약을 prop_B_old로 열 이름을 바꿔주고, log(prop_A_new / prop_B_old)로 log_ratio를 구해주도록 한다.
+
+```{r}
+bind_rows(head(new_old_word, 20) %>% mutate(label = 'top_20'), 
+          tail(new_old_word, 20) %>% mutate(label = 'under_20')) %>% 
+  ggplot(aes(x = word, y = log_ratio, fill = label)) +
+  geom_col(show.legend = F) +
+  facet_wrap(~label, scales = 'free_y', nrow = 2) +
+  coord_flip() +
+  xlab(NULL) + ylab(NULL) + 
+  theme(axis.text = element_text(size = 7))
+```
+
+그리고 log_ratio의 상위 20개와 하위 20개를 추출하여 각 단어와 그 비율을 시각화 해보았다.
+
+이를 통해 알게 된 사실은 다음과 같다.
+
+- stopwords를 제거하고, 성경 전체에서 사용된 단어는 약 13,000개 였는데, 구약과 신약 모두에서 10번 이상 사용된 단어는 약 800개 정도된다.
+- log 계산을 통해서 상위 20개는 신약(A)에서 많이 나오는 것이고, 하위 20개는 구약(B)에서 많이 나오는 단어들이다.
+- 신약에서 많이 나왔던 단어들은 faith, truth, teaching, teacher, crowd 등으로 군중들에 대하여 믿음에 대한 가르침에 대해 주로 이야기한 것으로 생각된다.
+- 구약에서 많이 나왔던 단어들은 judah, israel, babylon, egypt, king 등으로 각 나라들에 대한 이야기로 내용을 풀어간 것으로 생각된다.
+
+### 3-1. Sentiment analysis by New and Old Testament
+```{r}
+tidy_bible %>% 
+  inner_join(get_sentiments('afinn')) %>% 
+  group_by(label) %>% 
+  summarise(sentiment_mean = mean(value))
+```
+
+다음으로는 성경의 감성분석을 실시해보도록 한다.
+
+가장 먼저는 약 2,400개 단어로 긍정과 부정을 -5부터 5까지로 나눈 'afinn' 사전을 통해서 구약과 신약의 긍부정 정도의 평균값을 알아보려고 한다.
+
+이를 위해서 'afinn' 사전을 inner_join 하고, 구약과 신약 각각에 대하여 각 단어의 긍부정 점수의 평균 값을 계산해본다.
+
+이를 통해 구약은 긍정보다 부정 단어의 비중이 약간 더 높은 -0.281 정도가, 신약은 0.286 정도가 나온 것을 확인할 수 있다.
+
+```{r}
+bible_sentiment <- tidy_bible %>% 
+  count(word, label, sort = T) %>% 
+  inner_join(get_sentiments('bing')) 
+
+bible_sentiment %>% 
+  group_by(label, sentiment) %>% 
+  summarise(count = n()) %>% 
+  spread(sentiment, count)
+```
+
+이번에는 약 6,700개 단어가 있으면서 긍정과 부정으로 나눈 'bing' 사전을 통해서 감성분석을 해보도록 한다.
+
+가장 먼저는 'bing' 사전과 inner_join 하여 bible_sentiment 데이터프레임을 만들어준다.
+
+그리고 나서는 label과 sentiment를 통해 구약과 신약에서 각각 부정과 긍정 단어가 몇 번 정도 나왔는지 확인하다.
+
+결과를 보면, 구약에서는 긍정보다, 부정이 더 많이 나왔던 것을 볼 수 있고, 신약 역시도 그러한 결과를 보이고 있다.
+
+```{r}
+tidy_bible %>% 
+  group_by(label) %>% 
+  inner_join(get_sentiments('nrc')) %>% 
+  count(label, sentiment) %>% 
+  group_by(label, sentiment) %>% 
+  summarise(mean = mean(n)) %>% 
+  spread(label, mean) %>% 
+  arrange(desc(new, old))
+```
+
+
+### 3-2. Frequency of sentiment word by New and Old Testament
+```{r}
+bible_sentiment %>% 
+  arrange(desc(n)) %>% 
+  filter(label == 'old') %>% 
+  head(10)
+
+bible_sentiment %>% 
+  arrange(desc(n)) %>% 
+  filter(label == 'new') %>% 
+  head(10)
+```
+
+그렇다면, 구약과 신약 각각에 대하여 많이 나왔던 감성 단어 상위 10개를 출력해보도록 한다.
+
+먼저 구약에서는 gold와 holy 같은 긍정 단어가 가장 많이 나왔고, 이어서 sin, wicked, evil, death와 같은 부정 단어들이 많이 나왔다.
+
+한편, 신약에서는 faith, heaven, love, holy 같은 긍정 단어와 함께, dead, death, sin, evil과 같은 부정 단어가 나왔던 것을 볼 수 있다.
+
+```{r}
+bible_sentiment %>% 
+  group_by(word) %>% 
+  filter(n() == 2 & n >= 100) %>% 
+  filter(n() == 2) %>% 
+  ggplot() + facet_grid(cols = vars(sentiment), scales = 'free_x') +
+  geom_bar(aes(x = reorder(word, -n), y = n, fill = label), stat = 'identity') + 
+  theme(axis.text.x = element_text(angle = 30, vjust = 0.5, hjust = 1), 
+        axis.text = element_text(size = 8)) + 
+  xlab(NULL) + ylab(NULL)
+```
+
+이번에는 구약과 신약 모두에서 100번 이상 나왔던 단어들에 대해 분석해보도록 한다.
+
+확인해보니, 부정은 sin, evil, death, dead로 비교적 구약에서 많이 나왔던 것으로 확인된다.
+
+또한 긍정은 holy, love, heaven, glory로 이 역시 구약에서 많이 나온 것으로 확인된다.
+
+전반적으로 부정에 대해서는 죄에 대한 이야기가 많이 나와서 구약과 신약 모두에서 해당 단어들이 많이 나온 것으로 생각된다.
+
+긍정에 대해서는 하나님의 사랑과 영광, 천국 등에 대한 이야기가 구약과 신약 모두에서 많이 나왔던 것으로 생각 되어진다.
+
+![](./test1.png)
+
+
+### 3-3. Sentiment analysis by each bible book
+```{r}
+bible_sentiment <- tidy_bible %>% 
+  inner_join(get_sentiments('bing')) %>% 
+  group_by(Book, sentiment) %>% 
+  summarise(value = n()) %>% 
+  group_by(sentiment) %>% 
+  mutate(prop = value / sum(value), 
+         pos = (cumsum(c(0, prop)) + c(prop / 2, .01))[1:n()])
+
+bible_sentiment %>% 
+  select(Book, sentiment, value, prop) %>% 
+  head()
+```
+
+이번에는 각 성경(Book) 별로 감성을 분석하여 비교하도록 한다.
+
+이를 위해서 긍정과 부정의 단어를 담고 있는 'bing' 사전을 다시 사용하도록 한다.
+
+bing 사전을 inner_join 하여 각 Book 별로 긍정과 부정의 단어가 몇 개 있는지 그 value를 구하도록 한다.
+
+그리고 부정과 긍정 각각에 대한 전체 합에서 각 책 별로 있는 단어들의 합으로 그 비율인 prop을 구해준다.
+
+이와 같은 과정을 head 함수를 통해서 확인할 수 있다.
+
+```{r}
+bible_sentiment %>% 
+  ggplot(aes(x = '', y = prop, fill = Book)) +
+  coord_polar('y') + facet_grid(cols = vars(sentiment)) +
+  geom_col(color = 'black', position = position_stack(reverse = T), show.legend = F) +
+  geom_text_repel(aes(x = 1.4, y = pos, label = ifelse(prop >= 0.03, paste(Book, round(prop, 3)), '')), 
+                  nudge_x = 0.3, segment.size = 0.5, size = 2.5, show.legend = FALSE) + 
+  theme_void() + theme(strip.text.x = element_text(size = 15))
+```
+
+긍정과 부정의 점수가 높았던 각 성경을 조금 직관적으로 확인하기 위해서 시각화를 수행하도록 한다.
+
+이번에는 pie chart를 통해서 긍정과 부정 각각에 대한 책들의 비율을 확인해보려고 한다.
+
+또한 상위 그룹들에 대해서는 그 이름과 비율을 Label로 달아서 확인할 수 있도록 한다.
+
+결과를 확인해보면, 긍정적 감성의 성경은 Psalms, Isaiah, Ezekiel, Proverbs 등이 있다.
+
+한편, 부정적 감성의 성경은 Psalms, Isaiah, Proverbs, Exodus 등이 있다.
+
+Psalms, Isaiah, Proverbs 등은 긍정과 부정 모두에서 높은 값들을 보였다.
+
+![](./test2.jpeg)
+
+### 3-4. Sentiment analysis for long books by chapter
+```{r}
+long_bible <- tidy_bible %>% 
+  group_by(Book) %>% 
+  summarise(n = n()) %>% 
+  arrange(desc(n)) %>% 
+  head()
+
+long_bible
+```
+
+길이가 긴 성경을 선택하기 위해서 Book을 기준으로 묶었을 때 개수를 확인해보고, 10000이 넘는 6가지 책에 대해 분석을 수행해보려고 한다.
+
+그 책들은 Psalms, Jeremiah, Isaiah, Genesis, Ezekiel, Numbers 이다.
+
+```{r}
+bible_sentiment <- tidy_bible %>% 
+  filter(Book %in% long_bible$Book) %>% 
+  inner_join(get_sentiments('bing')) %>% 
+  count(Book, index = as.integer(Chapter) %/% 5, sentiment) %>% 
+  spread(sentiment, n, fill = 0) %>% 
+  mutate(sentiment = positive - negative)
+
+bible_sentiment
+```
+
+각 Chapter들에 대한 분석을 하기 위해서 위에서 정한 6가지 책을 추려서 가지고 오도록 한다.
+
+긍정과 부정에 대한 감성 분석을 위해 'bing' 사전을 사용하고, 5 Chapter를 1번으로 읽어서 그에 따른 감성 점수를 구한다.
+
+감성 점수를 구하는 방법은 긍정에서 부정을 빼서 값이 클수록 긍정으로, 값이 작을수록 부정으로 인식되도록 한다.
+
+그에 따른 결과를 위와 같이 확인할 수 있다. 그러면 이를 시각화하여 직관적으로 표현해보고자 한다.
+
+```{r}
+bible_sentiment %>% 
+  ggplot(aes(x = index, y = sentiment, fill = Book)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~Book, ncol = 2, scales = 'free_x')
+```
+
+결과를 확인하면, 6개 대부분의 Chapter에서 긍정보다는 부정이 압도적으로 많이 나오고 있음을 확인할 수 있다.
+
+Ezekiel, Jeremiah, Numbers는 긍정의 감정을 느끼기 매우 어려운 것으로 나타난다.
+
+- 창세기(Genesis): 초반부에는 천지를 창조한 것과 아담과 하와가 범죄하는 장면들이 나온다. 이에 따라 긍정보다는 부정의 감정들이 높게 나오는 듯하다. 그리고 아브라함과 이삭, 야곱, 요셉 등 집안의 계보를 설명하는 부분에서 급격히 부정의 감정들이 많이 나타나는 것으로 확인되는데, 이 역시 그들의 범죄 등과 관련된 것으로 생각된다.
+- 민수기(Numbers): 민수기는 출애굽한 이스라엘 백성들이 광야에서 방랑하다가 모압 땅에 닿았던 과정들을 담고 있다. 아무래도 이스라엘 백성들에 반복되는 죄악과 그에 따라 부정 단어들의 빈도 수가 높아서 민수기 역시 부정 점수가 높았던 것으로 생각된다.
+- 시편(Psalms): 성경을 통틀어 가장 긴 시편은 다른 Book들과는 다르게 일부 Chapter에서는 부정보다 긍정의 점수들이 나오는 것을 볼 수 있다. 시편은 고난 중에 기도, 하나님에 대한 찬양, 감사, 회개 등 다양한 내용들을 담고 있기 때문에 긍정과 부정이 산재되어 있는 것으로 생각된다.
+- 이사야(Isaiah): 이사야는 불의하고 범죄하는 사람들에 대한 하나님의 심판에 대한 내용이 나온다. 따라서 상대적으로 다른 Chapter 보다 초반부에 부정 점수가 매우 높게 나오고 있는 것으로 생각된다. 한편, 후반부에서는 이스라엘의 구원과 회복 소망에 대한 긍정적인 이야기가 나오면서 긍정 점수가 소폭 상승하는 것도 확인할 수 있다.
+- 예레미야(Jeremiah): 예레미야에서는 타락과 부패로 가득한 유다 왕국에 대한 내용을 담고 있다. 그래서 다른 Book들보다 더더욱 부정 점수가 높았던 것을 확인할 수 있다.
+- 에스겔(Ezekiel): 에스겔은 포로가된 유다 백성들에 대한 내용이 나온다. 이 과정에서 죄를 범한 유다 백성들에게 임할 심판들에 대한 내용들이 초반부에 나오면서 부정 점수가 압도적으로 높았던 것을 확인할 수 있다.

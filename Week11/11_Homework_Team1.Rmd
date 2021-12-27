@@ -1,0 +1,850 @@
+---
+title: "Practice9"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(stringr)
+library(Metrics)
+options("scipen" = 1000)
+```
+
+### 데이터 불러오기
+```{r fig.align='center'}
+path <- 'https://raw.githubusercontent.com/Paul-scpark/Data_Mining_Practicum/main/data/'
+admission <- read.csv(paste0(path, 'ex2data1.txt'), header = F, col.names = c('exam1', 'exam2', 'admitted'))
+
+admission %>% 
+  ggplot(aes(x = exam1, y = exam2, col = as.factor(admitted))) + geom_point() +
+  scale_color_manual('admitted', values = c('grey', 'skyblue'), labels = c('not admitted', 'admitted')) + 
+  theme_classic()
+```
+
+exam1과 exam2의 점수를 바탕으로 대학에 합격 여부를 파악할 수 있는 주어진 데이터를 불러오도록 한다.
+
+이를 직관적으로 확인하기 위해 X축을 exam1로, Y축을 exam2로 하고, 각 점들에 대한 label을 갖는 그래프를 그려보도록 한다.
+
+### Logistic Regression 적용하기
+```{r}
+## Initial setting
+theta_vector <- c(0, 0, 0)
+
+feature.df <- admission %>% 
+  mutate(bias = 1) %>% 
+  select(bias, exam1, exam2)
+
+feature.df[, 2:3] <- sapply(feature.df[, 2:3], function(x){(x - mean(x)) / sd(x)}) # Normalization
+labelVector <- admission$admitted
+
+summary(feature.df)
+table(labelVector)
+```
+
+합격 여부를 분류할 수 있는 모델을 만들기 위해서 input 변수와 target 변수를 나눠주도록 한다.
+
+input 변수는 exam1과 exam2와 함께 1의 값을 갖는 bias를 추가하여 feature.df를 만들어준다.
+
+그리고 이 데이터의 경우에는 scale의 범위 차이가 있어서 이를 좁히기 위해 정규화를 수행해준다.
+
+최종적으로 feature.df의 summary를 통해서 각 변수들의 scale을 확인하고, target 변수의 개수 분포를 확인한다.
+
+```{r}
+## Hypothesis and Cost function
+sigmoid <- function(x){1 / (1 + exp(-x))}
+h <- function(x, theta_vector){sigmoid(theta_vector %*% x)}
+
+costFunction <- function(theta_vector){
+  hx <- apply(feature.df, 1, function(x){h(x, theta_vector)})
+  costV <- labelVector * log(hx) + (1 - labelVector) * log(1 - hx)
+  - mean(costV)
+}
+
+costFunction(theta_vector)
+```
+
+다음으로는 Cost를 줄여나가는 학습을 진행할 수 있도록 Hypothesis와 Cost 함수들을 정의해주도록 한다.
+
+Logistic Regression의 Hypothesis를 정의하기 위해 먼저 시그모이드를 정의해주도록 한다.
+
+그 후에는 theta_vector를 transpose 한 것과 x를 곱한 것에 시그모이드 함수를 취하여 Hypothesis를 정의한다.
+
+한편, Cost 함수는 -y * log(h(x)) - (1-y) * log(1 - h(x)) 이므로 이 또한 정의해주도록 한다.
+
+이를 통해 처음 theta_vector를 c(0, 0, 0)으로 정의하고, Cost 값을 계산하면 0.6931 정도가 나오는 것을 확인할 수 있다.
+
+```{r fig.align='center'}
+## Gradient Descent and Find optimal theta
+costDF <- data.frame(iter = 0, 
+                     t0 = theta_vector[1], 
+                     t1 = theta_vector[2], 
+                     t2 = theta_vector[3], 
+                     cost = costFunction(theta_vector))
+
+num_iter <- 1000
+m <- nrow(feature.df)
+alpha <- 1
+
+for (i in 1:num_iter){
+  theta_update <- (t(as.matrix(feature.df)) %*% 
+                     (apply(feature.df, 1, function(x){h(x, theta_vector)}) - labelVector)) / m * alpha
+  theta_vector <- theta_vector - theta_update[, 1]
+  costDF <- rbind(costDF, c(i, theta_vector, costFunction(theta_vector)))
+}
+
+head(costDF)
+
+## Learning Curve
+costDF %>% 
+  ggplot(aes(x = iter, y = cost)) + 
+  geom_line() + 
+  ggtitle('Learning Curve') + 
+  theme_bw()
+
+## Decision Boundary
+slope <- -theta_vector[2] / theta_vector[3]
+bias <- -theta_vector[1] / theta_vector[3]
+
+ggplot(feature.df, aes(x = exam1, y = exam2)) + 
+  geom_point(aes(col = as.factor(labelVector))) + 
+  geom_abline(slope = slope, intercept = bias, col = 'red') + 
+  scale_color_manual('admitted', values = c('grey', 'skyblue'), labels = c('not admitted', 'admitted')) + 
+  ggtitle(sprintf("%.2f + %.2f * exam1 + %.2f * exam2 = 0", theta_vector[1], theta_vector[2], theta_vector[3])) + 
+  theme_classic()
+```
+
+이제는 Cost 값의 결과들을 확인하면서 이를 줄여나갈 수 있는 theta 값을 찾으면서 계속 학습해보도록 한다.
+
+기존 c(0, 0, 0) 이었던 theta에 대하여 alpha를 1로 설정하고, 1000번 학습을 한 결과를 확인해본다.
+
+학습이 진행되면서 theta 값을 바꿔주기 위해 theta_update를 추가하여 기존 theta 값에 대해 그 값을 빼서 바꿔주도록 한다.
+
+최종적으로는 costDF에 학습이 진행되면서 바뀌어가는 theta 값과 cost를 rbind 하여 값을 확인해보도록 한다.
+
+그래프를 통해 결과를 보면 약 150번 정도 학습이 진행되었을때, 0.2 정도로 cost가 수렴하는 것을 볼 수 있다.
+
+그리고 이를 좌표 상에 Decision Boundary와 함께 표현 위와 같은 결과가 나오는 것을 확인할 수 있다.
+
+### 문제 1. Original scale의 Decision Boundary
+
+하지만 위와 같은 문제 해결 방식에는 초반에 scale의 차이가 있어서 정규화를 했던 점에서 한계점이 있다.
+
+단순 예측 과정에는 큰 무리가 없지만, Output 변수에 대해 각 (Original) Input 변수들의 영향을 확인할 수 있는 계수에 대한 해석이 어려워지는 한계가 있다.
+
+따라서 정규화 전에 Original scale에 대하여 Decision Boundary를 설정하는 부분에 대한 고민이 필요하다.
+
+위에서 만들어진 모델과 theta 값을 다시 original scale로 복구하여 Decision Boundary를 그려본다.
+
+```{r}
+mu1 <- mean(admission$exam1)
+mu2 <- mean(admission$exam2)
+sig1 <- sd(admission$exam1)
+sig2 <- sd(admission$exam2)
+```
+
+기존에 처음 정의했던 Hypothesis는 theta1 + (theta2 x x1) + (theta3 x x2) = 0의 꼴이다.
+
+여기서 기존 scale의 x1과 x2의 자리에 각각 정규화를 통해 (p1-mu1/sig1)과 (p2-mu2/sig2)가 들어가게 된다.
+
+따라서 다시 Hypothesis를 정의하면, theta1 + (theta2 x (p1-mu1/sig1)) + (theta3 x (p2-mu2/sig2))로 표현할 수 있다.
+
+이를 풀어주면 다음과 같음을 알 수 있다.
+
+= theta1 - (theta2 x mu1 / sig1) - (theta3 x mu2 / sig2) + (theta2/sig1 * p1) + (theta3/sig2 * p2)
+
+이와 같이 표현하여 상수항과 p1항, p2항을 각각 theta의 위치로 update 하여 theta_origin을 구해주도록 한다.
+
+```{r fig.align='center'}
+theta_origin <- c(theta_vector[1] - (theta_vector[2]*mu1/sig1) - (theta_vector[3]*mu2/sig2), 
+                  theta_vector[2] / sig1, 
+                  theta_vector[3] / sig2)
+
+slope <- -theta_origin[2] / theta_origin[3]
+bias <- -theta_origin[1] / theta_origin[3]
+
+ggplot(admission, aes(x = exam1, y = exam2)) + 
+  geom_point(aes(col = as.factor(labelVector))) + 
+  geom_abline(slope = slope, intercept = bias, col = 'red') + 
+  scale_color_manual('admitted', values = c('grey', 'skyblue'), labels = c('not admitted', 'admitted')) + 
+  ggtitle(sprintf("%.2f + %.2f * exam1 + %.2f * exam2 = 0", theta_origin[1], theta_origin[2], theta_origin[3])) + 
+  theme_classic()
+```
+
+이를 통해 original scale에 맞는 theta를 찾아주고, slope와 bias를 계산해준다.
+
+그리고 이를 시각화로 표현하면 다음과 같은 결과를 확인할 수 있다.
+
+### 문제 2. x1과 x2의 제곱한 것과 곱한 것을 새로운 Input 변수로 추가
+```{r}
+Logistic_Regression <- function(feature_df, label, num_iter, alpha){
+  # (1) Hypothesis와 Cost 함수 정의
+  sigmoid <- function(x){1 / (1 + exp(-x))}
+  h <- function(x, theta_vector){sigmoid(theta_vector %*% x)}
+  
+  costFunction <- function(theta_vector){
+    hx <- apply(feature_df, 1, function(x){h(x, theta_vector)})
+    costV <- label * log(hx) + (1 - label) * log(1 - hx)
+    -mean(costV, na.rm = T)
+  }
+  
+  # (2) feature_df의 열 개수만큼 theta_vector를 정의해주고, Cost 함수 결과로 output_df 만들기
+  theta_vector <- rep(0, ncol(feature_df))
+  
+  theta_df <- as.data.frame(t(as.data.frame(theta_vector)))
+  rownames(theta_df) <- 1
+  colnames(theta_df) <- str_replace(colnames(theta_df), 'V', 't')
+  
+  output_df <- data.frame(iter = 0, cost = costFunction(theta_vector), alpha = alpha, theta_df)
+  
+  # (3) Iteration 횟수만큼 학습하면서 output_df에 결과 누적시키기
+  m <- nrow(feature_df)
+  for (i in 1:num_iter){
+    theta_update <- (t(as.matrix(feature_df)) %*% 
+                       (apply(feature_df, 1, function(x){h(x, theta_vector)}) - label)) / m * alpha
+    theta_vector <- theta_vector - theta_update[, 1]
+    output_df <- rbind(output_df, c(i, costFunction(theta_vector), alpha, theta_vector))
+    
+    # (4) Cost 함수의 감소 폭이 10e-4 보다 작으면 iteration 횟수와 상관 없이 학습 중단
+    #if (output_df$cost[nrow(output_df) - 1] - output_df$cost[nrow(output_df)] <= 10e-4){break}
+  }
+  return (output_df)
+}
+```
+
+1번 문제에서 사용했던 Logistic Regression은 변수의 개수가 3개로 고정될 때 활용될 수 있는 알고리즘이었다.
+
+하지만 이번 문제에서는 x1과 x2 변수를 각각 제곱한 것과 두 변수를 곱한 것을 새로운 Input 변수로 활용한다.
+
+따라서 Input 변수의 개수가 추가되기 때문에 이를 반영해줄 수 있는 알고리즘을 다시 작성했다.
+
+정의한 Logistic_Regression 함수는 사용자로부터 feature_df를 받게 되는데, 이에 따라 자동으로 theta_vector를 생성한다.
+
+이렇게 정의한 알고리즘을 활용하여 이번 문제를 해결해보고자 한다.
+
+```{r}
+feature.df <- admission[, 1:2]
+feature.df[, 1:2] <- sapply(feature.df[, 1:2], function(x){(x - mean(x)) / sd(x)})
+feature.df <- feature.df %>% 
+  mutate(bias = 1, 
+         exam1_square = exam1 ** 2, 
+         exam2_square = exam2 ** 2, 
+         exam1_2 = exam1 * exam2) %>%
+  select(bias, exam1, exam2, exam1_square, exam2_square, exam1_2)
+labelVector <- admission$admitted
+
+summary(feature.df)
+table(labelVector)
+```
+
+위와 동일하게 주어진 조건에 따라 bias와 3개의 변수를 새롭게 추가하고, 정규화를 시켜주도록 한다.
+
+이를 통해 새롭게 만들었던 변수들이 잘 정규화가 되었는지 summary 함수로 확인하고, label 변수도 확인한다.
+
+```{r fig.align='center'}
+alpha_vec <- c(0.001, 0.005, 0.01, 0.05, 0.1, 1)
+alpha_list <- list()
+for (alpha in alpha_vec){
+  alpha_list[[paste0('alpha_', alpha)]] <- Logistic_Regression(feature.df, labelVector, 1000, alpha)
+}
+
+total_df <- data.frame()
+for (i in alpha_list){
+  total_df <- rbind(total_df, i)
+}
+
+total_df %>% 
+  filter(cost != Inf) %>% 
+  ggplot(aes(x = iter, y = cost, color = as.factor(alpha))) + 
+  geom_line()
+```
+
+그리고 alpha 값을 0.001부터 1까지 수정하여 각각의 학습률에 따른 cost의 변화를 확인해보도록 한다.
+
+결과를 확인해보면, 학습률이 1일때 가장 빠르게 그리고 Cost 함수가 최솟값을 갖는 것을 확인할 수 있다.
+
+1000번 정도 반복했을때, 0.1보다 작은 Cost 함수의 결과값을 갖는다.
+
+따라서 이 경우에 대해서만 다시 한번 Learning curve의 추이를 그려보도록 한다.
+
+```{r fig.align='center'}
+total_df %>% 
+  filter(alpha == 1) %>% 
+  ggplot(aes(x = iter, y = cost)) + 
+  geom_line() +
+  ggtitle('Learning curve') + 
+  theme_bw()
+```
+
+학습률이 1인 경우에 대해서만 iteration에 따른 cost 감소 추이를 그려도 위와 같은 결과를 다시 확인할 수 있다.
+
+학습이 진행됨에 따라 계속해서 Cost가 줄어드는 것을 확인할 수 있고, 최종적으로는 0.1 보다 작은 값을 갖는다.
+
+```{r}
+tail(costDF, 1)
+total_df %>% 
+  filter(alpha == 1) %>% 
+  select(-alpha) %>% tail(1)
+```
+
+변수를 추가하기 전과 후에 결과를 비교하면서 cost 값도 각각 확인해보고자 한다.
+
+먼저 기존에는 1000번 학습했을 때, cost가 0.2035 정도까지 감소한 것을 확인할 수 있다.
+
+또한 변수를 3개 정도 추가한 경우에는 cost가 0.0855까지 감소할 수 있었다.
+
+각 변수들을 제곱하거나, 곱하는 과정들을 통해서 target 변수 예측에 설명력이 조금 더해질 수 있었던 것 같다.
+
+### 문제 3. 문제 2에서 학습한 모델의 Decision Boundary의 그래프와 식 표현
+```{r}
+theta_df <- total_df %>% 
+  filter(alpha == 1) %>% 
+  select(-alpha) %>% tail(1)
+
+contour_df <- 
+  data_frame(exam1 = rep(seq(min(feature.df$exam1), max(feature.df$exam2), length=100), times=100), 
+             exam2 = rep(seq(min(feature.df$exam2), max(feature.df$exam2), length=100), each=100),
+             z = theta_df$t1 + 
+               theta_df$t2*exam1 + 
+               theta_df$t3*exam2 + 
+               theta_df$t4*exam1^2 + 
+               theta_df$t5*exam2^2 +
+               theta_df$t6*exam1*exam2)
+
+head(contour_df, 20)
+```
+
+이번에는 위에서 학습한 결과로 Decision Boundary를 그려보도록 한다.
+
+이를 위해서 최종적으로 가장 cost가 낮았던 alpha가 1일때의 theta 값들을 확인해본다.
+
+그 후에는 geom_contour 함수를 적용하기 위하여 식을 만들 때 사용되었던 exam1과 exam2 변수를 가지고 온다.
+
+그리고 나서는 최종적으로 구했던 theta 값들을 대입하여 각각의 input 변수에 따른 결과값을 가진 z 변수를 만들어주도록 한다.
+
+```{r}
+ggplot(feature.df, aes(x = exam1, y = exam2)) + 
+  geom_point(aes(col = as.factor(labelVector))) +
+  geom_contour(data = contour_df, aes(x = exam1, y = exam2, z = z), breaks = c(0)) +
+  ggtitle(sprintf("%.2f + %.2f * exam1 + %.2f * exam2 + %.2f * exam1^2 + %.2f * exam2^2 + %.2f * exam1*exam2 = 0", 
+                  theta_df$t1, theta_df$t2, theta_df$t3, theta_df$t4, theta_df$t5, theta_df$t6)) + 
+  theme_classic()
+```
+
+그 후에는 이를 ggplot을 이용하여 식을 정의하고, 시각화를 표현해보도록 한다.
+
+비선형으로 추가된 Decision Boundary를 표현하기 위하여 geom_contour 함수를 사용해주도록 한다.
+
+2개의 input 변수인 exam1과 exam2 그리고 해당 변수들을 통해 계산된 식의 결과값 z를 활용하여 Boundary를 표현하면 위와 같음을 알 수 있다.
+
+또한 그 식은 7.04 x (6.85 x exam1) + (6.94 x exam2) - (3.43 x exam1^2) - (2.34 x exam2^2) - (1.98 x exam1 x exam2) = 0이다.
+
+### 문제 4. 타이타닉 데이터에 대해 분류 모델 만들어보기
+```{r}
+train <- read.csv('./train.csv')
+test <- read.csv('./test.csv')
+ID <- test$PassengerId
+
+str(train)
+str(test)
+```
+
+이번 문제에서는 타이타닉 데이터를 이용하여 생존자를 예측할 수 있는 분류 모델을 만들어본다.
+
+train과 test 데이터를 불러와서 str 함수로 각각에 데이터를 확인해보도록 한다.
+
+train 데이터는 target 변수인 'Survived'를 포함하여 총 12개 변수가 있고, test는 11개 변수가 있다.
+
+이에 대한 모델을 만들어보기 위해 간단히 데이터를 확인해보고, 전처리해보도록 한다.
+
+```{r}
+# NA 처리하기
+colSums(is.na(train))
+colSums(is.na(test))
+```
+
+가장 먼저는 train과 test 데이터에 대하여 각 변수별로 NA의 여부를 확인해보도록 한다.
+
+결과를 보면, train 데이터에는 Age 변수에만 177개의 NA가 있었고, test 데이터에는 Age와 Fare 변수에 NA가 있었다.
+
+NA가 존재하는 경우에는 모델이 제대로 만들어지고, 작동되기 어렵기 때문에 처리를 해줘야 한다.
+
+먼저 NA가 가장 많았던 Age 변수의 NA를 대체할 수 있는 방법을 고민해보도록 한다.
+
+```{r}
+head(train$Name)
+
+train$name_label <- gsub("^.*, (.*?)\\..*$", "\\1", train$Name)
+name_age <- aggregate(Age~name_label, train, mean)
+colnames(name_age) <- c('name_label', 'Age_mean')
+name_age
+```
+
+가장 먼저 Name 변수를 확인해보면, 영어 표현이긴 하지만 성과 이름 그리고 그 사람을 부르는 호칭이 들어가있다.
+
+예를들면, Mr, Mrs, Miss, Master 등의 호칭을 통해서 정확하지는 않겠지만 나이를 유추해볼 수 있을 것이다.
+
+따라서 정규표현식을 활용하여 첫번째 단어와 콤마 그리고 두번째 단어와 .으로 끝나는 부분만을 추리도록 한다.
+
+이렇게 되면, 위에서 이야기했던 Mr, Mrs, Miss, Mrs, Mr, Mr 등의 단어들이 추출될 수 있다.
+
+이를 name_label이라는 새로운 변수로 만들어주고, aggregate 함수를 통해서 같은 호칭 별로의 평균 나이를 구해준다.
+
+```{r}
+train <- train %>% 
+  left_join(name_age, by = 'name_label') %>% 
+  mutate(Age = ifelse(is.na(Age), Age_mean, Age)) %>% 
+  select(-name_label, -Age_mean)
+
+colSums(is.na(train))
+```
+
+그리고 나서는 각 호칭 별로 평균 나이를 가지고 있는 name_age 데이터를 train과 join 해준다.
+
+그 후에는 Age 값이 NA인 데이터는 평균 나이로 대체해주도록 한다. 이를 통해 train 데이터에 모든 NA가 사라진 것을 확인할 수 있다.
+
+```{r}
+# test 데이터에서도 NA를 모두 없애주기
+test$name_label <- gsub("^.*, (.*?)\\..*$", "\\1", test$Name)
+
+test <- test %>% 
+  left_join(name_age, by = 'name_label') %>% 
+  mutate(Age = ifelse(is.na(Age), Age_mean, Age)) %>% 
+  select(-name_label, -Age_mean)
+
+test[is.na(test$Fare), ]
+```
+
+test 데이터에서도 똑같이 name_age를 join 하여 NA인 Age 값들을 바꿔주도록 한다.
+
+한편, test 데이터에는 Fare(요금)에 대한 데이터 중에 하나가 NA인 것을 확인했었다. 이 또한 바꿔주기 위해서 해당 변수를 확인해보도록 한다.
+
+결과를 보면, 60세의 Embarked(승선항, 출항지)는 S이고, Pclass(선실의 등급)는 3이다.
+
+따라서 비슷한 나이대에서 Embarked는 S이고, Pclass는 3인 Fare의 값으로 대체해주도록 한다.
+
+```{r}
+train %>% 
+  filter(Embarked == 'S') %>% 
+  filter(Pclass == 3) %>% 
+  filter(Age >= 60)
+
+test$Fare <- ifelse(is.na(test$Fare), 7.867, test$Fare)
+colSums(is.na(test))
+```
+
+train 데이터에서 위의 조건을 충족하는 사람들을 확인해보면, 총 3명이 나온다.
+
+또한 이들의 Fare는 6.2, 9.5, 7.7 달러 정도로 거의 유사한 것을 확인할 수 있다. 평균 값은 7.867이다.
+
+따라서 이 값들의 평균으로 test 데이터에 있는 Fare의 NA 값을 대체해주도록 한다.
+
+이를 통해 test 데이터에 대해서도 모든 변수들이 NA가 없는 것을 확인할 수 있다.
+
+```{r}
+colnames(train)
+train <- train %>% 
+  select(-PassengerId, -Name, -Ticket, -Cabin)
+
+train <- train %>% 
+  transform(Sex_male = ifelse(Sex == 'male', 1, 0), 
+            Sex_female = ifelse(Sex == 'female', 1, 0), 
+            Embarked_S = ifelse(Embarked == 'S', 1, 0), 
+            Embarked_C = ifelse(Embarked == 'C', 1, 0), 
+            Embarked_Q = ifelse(Embarked == 'Q', 1, 0)) %>% 
+  select(-Sex, -Embarked) %>% 
+  mutate(Age = log(Age), Fare = log(Fare)) %>% 
+  mutate(Fare = ifelse(Fare == -Inf, 0, Fare))
+
+summary(train)
+```
+
+이제는 기본적인 전처리는 모두 마무리 되었으니, 모델에 활용할 수 있는 변수들을 추려보도록 한다.
+
+PassengerId는 사용자를 구분하기 위함이기 때문에 제거하고, Name 역시 모델의 성능에는 도움이 되지 않기 때문에 제거한다.
+
+또한 ticket과 Cabin 역시도 해당 변수만으로는 특별한 패턴을 찾아 보기 힘들기 때문에 제거해주도록 한다.
+
+그리고 범주형 변수의 형태를 갖는 Sex와 Embarked 변수는 Dummy coding 처리를 해주도록 한다.
+
+마지막으로는 Age와 Fare 변수의 경우에는 scale 차이가 심하기 때문에 log를 통해서 표준화를 시켜주도록 한다.
+
+이를 통해 최종적인 train 데이터를 구축할 수 있다.
+
+```{r}
+test <- test %>% 
+  select(-PassengerId, -Name, -Ticket, -Cabin)
+
+test <- test %>% 
+  transform(Sex_male = ifelse(Sex == 'male', 1, 0), 
+            Sex_female = ifelse(Sex == 'female', 1, 0), 
+            Embarked_S = ifelse(Embarked == 'S', 1, 0), 
+            Embarked_C = ifelse(Embarked == 'C', 1, 0), 
+            Embarked_Q = ifelse(Embarked == 'Q', 1, 0)) %>% 
+  select(-Sex, -Embarked) %>% 
+  mutate(Age = log(Age), Fare = log(Fare), bias = 1) %>% 
+  mutate(Fare = ifelse(Fare == -Inf, 0, Fare))
+```
+
+이와 같은 전처리 과정을 test 데이터도 동일하게 수행해주도록 한다.
+
+이렇게 최종적인 train과 test가 준비되었고, train 데이터에 대하여 Logistic Regression으로 모델을 만들어본다.
+
+```{r}
+feature.df <- train %>% 
+  mutate(bias = 1) %>% 
+  select(-Survived)
+
+labelVector <- train$Survived
+
+feature.df <- train %>% 
+  mutate(bias = 1) %>% 
+  select(-Survived)
+
+labelVector <- train$Survived
+
+alpha_vec <- c(0.001, 0.005, 0.01, 0.05, 0.1)
+alpha_list <- list()
+for (alpha in alpha_vec){
+  alpha_list[[paste0('alpha_', alpha)]] <- Logistic_Regression(feature.df, labelVector, 1000, alpha)
+}
+
+total_df <- data.frame()
+for (i in alpha_list){
+  total_df <- rbind(total_df, i)
+}
+
+total_df %>% 
+  filter(cost != Inf) %>% 
+  ggplot(aes(x = iter, y = cost, color = as.factor(alpha))) + 
+  geom_line()
+
+total_df %>% 
+  filter(alpha == 0.1) %>% tail(1)
+```
+
+모델링을 위해서 모델에 활용되는 input 변수들의 feature.df와 생존여부를 담고 있는 labelVector를 만들어준다.
+
+그리고 나서는 위에서 정의했던 Logistic_Regression 함수를 활용하여 각 iteration에 대해 cost가 줄어드는 것을 그래프로 확인하도록 한다.
+
+그리고 alpha 값을 0.001부터 0.1까지 조정하면서 출력되는 cost 값들을 iteration과 함께 그래프로 그려보았다.
+
+결과를 확인하면, 가장 학습률이 큰 0.1 일때, Cost 값이 최솟값이 되고 있음을 확인할 수 있다.
+
+해당 결과에 대하여 각 theta 값을 위와 같이 확인해볼 수 있다. 이를 활용하여 train과 test 데이터에 대하여 직접 생존자를 분류해보도록 한다.
+
+### 문제 5. 만든 모델을 통해 train 데이터와 test 데이터의 결과 비교
+```{r}
+theta_df <- total_df %>% 
+  filter(alpha == 0.1) %>% tail(1)
+theta_df <- theta_df[4:14]
+
+train$pred <- ifelse(as.matrix(feature.df) %*% t(as.matrix(theta_df)) > 0, 1, 0)
+accuracy(train$Survived, train$pred)
+rmse(train$Survived, train$pred)
+```
+
+alpha 값을 바꿔가면서 성능이 가장 좋았던 0.1 일때의 theta 값들을 가져와서 theta_df에 다시 할당해준다.
+
+그리고 나서는 Pclass부터 bias까지 총 11개 변수를 가지고 있는 feature.df에 대하여 theta 값이 각 계수의 역할을 수행해준다.
+
+따라서 각 메트릭스의 행과 열을 맞춰서 내적하여 각각에 대한 결과를 계산한다. 그리고 그 값이 0 보다 큰 경우에는 1로, 그렇지 않은 경우에는 0으로 할당해준다.
+
+이를 모델을 만들었던 train 데이터에 먼저 적용하여 평가지표인 accuracy 값을 확인해보면, 약 0.807 정도의 값이 나오는 것을 확인할 수 있다.
+
+그렇다면, 이 모델을 test 데이터에 적용한다면 어떠한 결과가 나오는지 실제 Kaggle 사이트에 결과를 올려서 점수를 확인해보도록 한다.
+
+```{r}
+test$Survived <- ifelse(as.matrix(test) %*% t(as.matrix(theta_df)) > 0, 1, 0)
+
+df <- as.data.frame(cbind(PassengerId = ID, Survived = test$Survived))
+colnames(df) <- c('PassengerId', 'Survived')
+head(df, 10)
+#write.csv(df, '/Users/paul/Desktop/gender_submission.csv', row.names = FALSE)
+```
+
+train과 동일한 방식으로 train 데이터로부터 구했던 theta 값을 활용해서 각 변수들과 내적한 값이 0 보다 큰지, 작은지를 확인한다.
+
+그리고 PassengerId와 생존 여부를 의미하는 예측값인 Survived만 추려서 데이터를 만들어서 Kaggle에 제출하여 결과를 확인해본다.
+
+![](output.png)
+
+test 데이터에 대한 결과를 확인하면, 평가 지표인 accuracy가 0.756 정도 나오는 것을 볼 수 있다.
+
+앞서 train 데이터에서는 0.807 정도의 값이 나왔던 것에 비해서는 조금 낮게 나왔던 것을 확인할 수 있다.
+
+그렇지만 그 차이가 매우 심하지는 않아서 Overfitting 이라고 하기엔 조금 어렵지 않을까 생각된다.
+
+또한 간단한 전처리를 수행하고, 모델을 만들어보았는데 새로운 변수들을 추가하고, 활용한다면 더 성능을 높일 수 있을 것으로 생각된다.
+
+
+### 문제 4, 5번에 대한 또 다른 풀이
+
+```{r}
+train <- read.csv('./train.csv')
+test <- read.csv('./test.csv')
+summary(train)
+```
+Train Data에 대해서 각 Column들의 type과 정보 확인. Age에 177개의 NA 데이터를 확인 할 수 있다.
+
+```{r}
+colSums(is.na(train))
+```
+
+```{r}
+train %>%
+    group_by(Cabin) %>%
+    count %>%
+    head
+```
+
+Cabin 변수 또한 ""의 빈칸 데이터가 687개인 것을 확인 할 수 있다.
+
+```{r}
+train %>%
+    ggplot(aes(Pclass)) +
+    geom_histogram(stat = "count")
+```
+
+Pclass는 1, 2, 3 으로 분류 되는 것을 확인한다.
+
+```{r}
+train %>%
+    ggplot(aes(Sex)) +
+    geom_histogram(stat = "count")
+```
+
+Sex는 male, female로 나눠진다.
+
+```{r}
+train %>%
+    ggplot(aes(SibSp)) +
+    geom_histogram(stat = "count")
+```
+
+SibSp 는 0명에서 8명으로 나눠진다. 추후 이 데이터는 형제 자매기 있냐 없냐로만 나눌 예정이다.
+
+```{r}
+train %>%
+    ggplot(aes(Parch)) +
+    geom_histogram(stat = "count")
+```
+
+부모/자녀 또한 0명에서 6명으로 나눠진다. 있냐 없냐로만 나눌 예정이다.
+
+```{r}
+summary(train$Fare)
+```
+
+Fare는 Quantile로 나눠줄 예정이다.
+
+```{r}
+train %>%
+    ggplot(aes(Embarked)) +
+    geom_histogram(stat = "count")
+```
+Embarked 는 C, Q, S와 몇개의 "" 데이터가 존재한다.
+
+```{r}
+train.df <- train %>%
+    select(Survived, Pclass, Sex, SibSp, Parch, Fare, Embarked)
+```
+
+train.df에 Name, Age, Cabin, Ticket은 제외하고 넣어준다.
+
+```{r}
+q <- quantile(train$Fare)
+
+train.df$Pclass1 <- ifelse(train.df$Pclass == 1, 1, 0)
+train.df$Pclass2 <- ifelse(train.df$Pclass == 2, 1, 0)
+train.df$Pclass3 <- ifelse(train.df$Pclass == 3, 1, 0)
+train.df$Sex_M <- ifelse(train.df$Sex == "male", 1, 0)
+train.df$Sex_F <- ifelse(train.df$Sex == "female", 1, 0)
+train.df$Embarked_C <- ifelse(train.df$Embarked == 'C', 1, 0)
+train.df$Embarked_Q <- ifelse(train.df$Embarked == 'Q', 1, 0)
+train.df$Embarked_S <- ifelse(train.df$Embarked == 'S', 1, 0)
+train.df$Fare_Verylow <- ifelse(train.df$Fare < q[2], 1, 0)
+train.df$Fare_Low <- ifelse((train.df$Fare < q[3] && 
+                                train.df$Fare >= q[2]), 1, 0)
+train.df$Fare_High <- ifelse(train.df$Fare < q[4] & 
+                                train.df$Fare >= q[3], 1, 0)
+train.df$Fare_Veryhigh <- ifelse(train.df$Fare <= q[5] & 
+                                 train.df$Fare >= q[4], 1, 0)
+train.df$SibSp_None <- ifelse(train.df$SibSp == 0, 1, 0)
+train.df$SibSp_Exist <- ifelse(train.df$SibSp > 0, 1, 0)
+train.df$Parch_None <- ifelse(train.df$Parch == 0, 1, 0)
+train.df$Parch_Exist <- ifelse(train.df$Parch > 0, 1, 0)
+```
+
+모든 변수에 대해서 dummy coding을 해주었다.
+Fare 같은 경우 quantile로 나눠줘서 Very low, low, high, very high로 구간을 설정 해주고 dummy variable로 만들어준다. Sib과 Parch도 있냐 없냐 2가지의 경우의 수로만 축소 해주었고 Embarked, Sex, PClass 는 주어진 변수대로 분류해주었다.
+
+```{r}
+train.df <- train.df %>%
+    select(-c(Pclass, Sex, Fare, SibSp, Parch, Embarked, ))
+```
+
+dummy coding을 해주었으면 기존에 있던 변수들은 제거해준다.
+
+```{r}
+sigmoid <- function(x) {
+    1 / ( 1 + exp(-x) )
+}
+
+h <- function(x, theta_vector) {
+    sigmoid(theta_vector %*% x)
+}
+costFunction3 <- function(theta_vector) {
+    hx <- apply(feature.df3, 1, function(x){h(x,theta_vector)})
+    costV <- labelVector3 * log(hx) + (1-labelVector3) * log(1-hx)
+    -mean(costV)
+}
+```
+
+우리가 사용할 cost function과 hypothesis에 대한 function 정의를 해준다.
+
+```{r}
+feature.df3 <- train.df %>%
+    mutate(bias = 1) %>%
+    select(-Survived)
+labelVector3 <- train.df$Survived
+
+theta_vector3 <- c(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+
+costFunction3(theta_vector3)
+```
+
+feature.df에 bias를 넣어주고 survived만 제외한 변수들을 넣어준다.
+bias와 함께 변수가 17개여서 theta_vector에 17개의 초기값들을 넣어준다.
+labelVector 에 우리가 예측하고 싶은 Survived의 데이터를 넣어준다.
+
+그러면 0.69의 cost Function이 나오는 것을 확인 할 수 있다.
+
+```{r}
+costDF3 <- data.frame(iter = 0,
+                      t0 = theta_vector3[1],
+                      t1 = theta_vector3[2],
+                      t2 = theta_vector3[3],
+                      t3 = theta_vector3[4],
+                      t4 = theta_vector3[5],
+                      t5 = theta_vector3[6],
+                      t6 = theta_vector3[7],
+                      t7 = theta_vector3[8],
+                      t8 = theta_vector3[9],
+                      t9 = theta_vector3[10],
+                      t10 = theta_vector3[11],
+                      t11 = theta_vector3[12],
+                      t12 = theta_vector3[13],
+                      t13 = theta_vector3[14],
+                      t14 = theta_vector3[15],
+                      t15 = theta_vector3[16],
+                      t17 = theta_vector3[17],
+                      cost = costFunction3(theta_vector3))
+num_iter <- 1000
+m <- nrow(feature.df3)
+alpha = 1
+for (i in 1:num_iter) {
+    theta_update3 <- (t(as.matrix(feature.df3)) %*% (apply(feature.df3, 1, function(x){h(x, theta_vector3)}) - labelVector3)) / m*alpha
+    theta_vector3 <- theta_vector3 - theta_update3[,1]
+    costDF3 <- rbind(costDF3, c(i, theta_vector3, costFunction3(theta_vector3)))
+}
+
+costDF3 %>%
+    ggplot(aes(x = iter, y = cost)) +
+    geom_line() +
+    ggtitle('learning curve') +
+    theme_bw()
+```
+
+logistic regression을 실행시켜준다. Cost 값이 잘 줄어드는 것을 iteration과 cost의 그래프를 그린 섟으로 확인이 가능하다.
+
+```{r}
+costDF3[1001,]
+theta_vector3
+```
+
+우리가 가지게 된 최종 학습된 수치이다.
+
+```{r}
+fin <- theta_vector3
+
+predict <- as.data.frame(ifelse( fin[17] + fin[1]*train.df$Pclass1 + 
+                                             fin[2]*train.df$Pclass2 + 
+                                fin[3]*train.df$Pclass3 +
+                                fin[4]*train.df$Sex_M + fin[5]*train.df$Sex_F + 
+                                fin[6]*train.df$Embarked_C + 
+                                fin[7] * train.df$Embarked_Q + fin[8] * train.df$Embarked_S + 
+                                fin[9] * train.df$Fare_Verylow + fin[10] * train.df$Fare_Low + 
+                                fin[11] * train.df$Fare_High + 
+                                fin[12] * train.df$Fare_Veryhigh + fin[13] * train.df$SibSp_None + 
+                                fin[14] * train.df$SibSp_Exist + fin[15] * train.df$Parch_None + 
+                                fin[16] * train.df$Parch_Exist > 0.5, 1, 0))
+```
+
+우리가 가진 train 데이터에다가 train을 시켜본다.
+
+```{r}
+prediction <- data.frame( train.df$Survived, predict)
+colnames(prediction) <- c('actual', 'predict')
+prediction <- prediction %>%
+    mutate(correct = actual == predict)
+
+sum(prediction$correct) / 891
+```
+
+Train 데이터에 적용한 결과 81.1%의 accuracy를 보여준다.
+
+```{r}
+test.df <- test %>%
+    select(Pclass, Sex, SibSp, Parch, Fare, Embarked)
+
+test.df$Pclass1 <- ifelse(test.df$Pclass == 1, 1, 0)
+test.df$Pclass2 <- ifelse(test.df$Pclass == 2, 1, 0)
+test.df$Pclass3 <- ifelse(test.df$Pclass == 3, 1, 0)
+test.df$Sex_M <- ifelse(test.df$Sex == "male", 1, 0)
+test.df$Sex_F <- ifelse(test.df$Sex == "female", 1, 0)
+test.df$Embarked_C <- ifelse(test.df$Embarked == 'C', 1, 0)
+test.df$Embarked_Q <- ifelse(test.df$Embarked == 'Q', 1, 0)
+test.df$Embarked_S <- ifelse(test.df$Embarked == 'S', 1, 0)
+test.df$Fare_Verylow <- ifelse(test.df$Fare < q[2], 1, 0)
+test.df$Fare_Low <- ifelse((test.df$Fare < q[3] && 
+                                test.df$Fare >= q[2]), 1, 0)
+test.df$Fare_High <- ifelse(test.df$Fare < q[4] & 
+                                test.df$Fare >= q[3], 1, 0)
+test.df$Fare_Veryhigh <- ifelse(test.df$Fare <= q[5] & 
+                                    test.df$Fare >= q[4], 1, 0)
+test.df$SibSp_None <- ifelse(test.df$SibSp == 0, 1, 0)
+test.df$SibSp_Exist <- ifelse(test.df$SibSp > 0, 1, 0)
+test.df$Parch_None <- ifelse(test.df$Parch == 0, 1, 0)
+test.df$Parch_Exist <- ifelse(test.df$Parch > 0, 1, 0)
+
+test.df <- test.df %>% select(-c(Embarked, Pclass, Sex, SibSp, Parch, Fare))
+
+head(test.df)
+```
+
+test 파일을 불러와서 train에 학습된 알고리즘을 적용 시켜볼 예정이다. 그러기 위해서 train데이터와 같은 형식으로 맞춰준다.
+
+```{r}
+test.df$Survived <- ifelse( fin[17] + fin[1]*test.df$Pclass1 + fin[2]*test.df$Pclass2 + 
+                                 fin[3]*test.df$Pclass3 +
+                                fin[4]*test.df$Sex_M + fin[5]*test.df$Sex_F + 
+                             fin[6]*test.df$Embarked_C + 
+                                fin[7] * test.df$Embarked_Q + fin[8] * test.df$Embarked_S + 
+                                 fin[9] * test.df$Fare_Verylow + fin[10] * test.df$Fare_Low + 
+                                 fin[11] * test.df$Fare_High + 
+                                fin[12] * test.df$Fare_Veryhigh + fin[13] * test.df$SibSp_None + 
+                                fin[14] * test.df$SibSp_Exist + fin[15] * test.df$Parch_None + 
+                                fin[16] * test.df$Parch_Exist > 0.5, 1, 0)
+```
+
+test.df$Survived에다가 예측 모델을 넣어주고, 데이터 형식에 맞춰서 제출하여 결과를 확인한다.
+
+Kaggle에서 확인한 최종 결과는 약 77.511% 의 Accuracy를 가진다.
+
+OverFitting에 조금 가까운 것 같지만 그렇게 81%와 그렇게 큰 차이는 없다고 판단된다.
+지금은 OverFitting의 문제를 해결하기 보다 Bias를 어떻게 줄여서 더 좋은 학습 Model로 만들어줄지를 고민하고 시도 해봐야 된다고 생각한다.
+
+특히 데이터 전처리 과정에서 Dummy Coding으로 진행을 하였기 때문에 Model이 복잡해져서 OverFitting이 될 걱정은 없었다. 하지만 Age와 Name에서 Title과 같은 변수들을 못 뽑아 냈기 때문에 Bias가 낮을 수 밖에 없을 것 같다. 그래서 전체적으로 Train 과 Test에서의 성능을 더 높일 수 있지 않을까 싶다.

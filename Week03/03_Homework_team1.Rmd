@@ -1,0 +1,626 @@
+---
+title: "Practice 3 (Team 1)"
+author: "박성찬 김효진 강하영 조선주"
+date: '2021 9 25'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, out.width="100%")
+library(tidyr)
+library(ggplot2)
+library(dplyr)
+library(readxl)
+library(scales)
+library(stringr)
+library(maps)
+library(reshape2)
+library(unikn)
+library(tidyquant)
+options("scipen" = 1000)
+theme_set(theme_grey(base_family='NanumGothic'))
+```
+
+## Loading Data
+```{r}
+path <- 'https://raw.githubusercontent.com/Paul-scpark/Data_Mining_Practicum/main/data/'
+
+covid_df <- read.csv(paste0(path, 'covid19_210903.csv'))
+GDP <- read.csv(paste0(path, 'GDP_per_capita.csv'), skip = 2, header = TRUE)
+life_expectancy <- read.csv(paste0(path, 'Life_expectancy.csv'))
+pop <- read.csv(paste0(path, 'population_total.csv'))
+code <- read.csv(paste0(path, 'country_code_with_region.csv'))
+```
+
+```{r}
+colnames(GDP) <- str_replace(colnames(GDP), pattern = 'X', replacement = '')
+
+GDP <- 
+  GDP %>%
+  gather(time, GDP, -c(geo, Country.Name))
+
+pop <- gather(pop, time, POP, 2:302)
+pop$time <- gsub('X', '', pop$time)
+```
+
+```{r}
+str(GDP)
+str(life_expectancy)
+str(pop)
+```
+
+가장 먼저 GDP 데이터에서 열 이름이 'X + 연도'로 되어 있어서 str_replace로 앞에 X를 없애준다.
+
+그리고 gather 함수를 통해서 연도와 GDP를 각각 하나의 열로 만들어서 tidy data로 변경한다.
+
+또한 인구수 데이터 역시 GDP처럼 tidy data로 바꾼 후, str 함수로 각 데이터를 확인한다.
+
+```{r}
+unique(GDP$geo) %>% length()
+
+unique(life_expectancy$geo) %>% length()
+
+unique(pop$country) %>% length()
+```
+
+각 데이터들의 분포를 확인하기 위해서 가장 먼저 고유한 국가의 개수가 몇 개씩 있는지 확인해보도록 한다.
+
+GDP 데이터는 197개의 국가가, life_expectancy 데이터는 189개 국가, pop 데이터는 195개 국가가 있다.
+
+```{r}
+colSums(is.na(GDP))
+colSums(is.na(life_expectancy))
+colSums(is.na(pop))
+unique(GDP[is.na(GDP$GDP), ]$geo)
+GDP <- drop_na(GDP)
+```
+
+혹시 데이터에 NA가 포함된 데이터가 있는지도 확인해보도록 한다.
+
+life_expectancy와 pop 데이터는 각 변수 별로 NA는 하나도 없음을 확인할 수 있었다.
+
+하지만 GDP 데이터는 GDP를 뜻하는 변수에서 NA가 482개가 있었음을 확인할 수 있었다.
+
+어떤 국가에서 NA가 있는지를 확인해보니, hos, lie 라는 2개의 국가에서 NA가 있었다.
+
+따라서 이를 제거하고, 결과를 확인해보도록 한다.
+
+```{r}
+colnames(GDP)[2] <- 'name'
+life_expectancy$time <- as.character(life_expectancy$time)
+total_df <- inner_join(GDP, life_expectancy, by = c('geo', 'time', 'name'))
+total_df <- total_df[order(total_df$geo), ]
+row.names(total_df) <- NULL
+
+unique(total_df$geo) %>% length()
+colSums(is.na(total_df))
+```
+
+GDP와 life_expectancy의 국가 수에 약간의 차이가 있으므로, inner_join으로 두 데이터를 묶어주도록 한다.
+
+데이터를 merge 한 후, 고유한 국가 수를 확인해보면 189개가 나오는 것을 볼 수 있다.
+
+또한 NA도 하나도 없다는 것을 확인할 수 있다.
+
+```{r}
+setdiff(total_df$name, pop$country)
+setdiff(pop$country, total_df$name)
+total_df <- left_join(total_df, pop, by = c('name' = 'country', 'time'))
+unique(total_df[is.na(total_df$POP), ]$name)
+```
+
+한편, 인구 수를 담고 있는 pop 데이터도 함께 묶어주도록 한다.
+
+다만, GDP와 기대수명을 함께 묶은 데이터와 인구 수 데이터 사이에 함께 있지 않은 국가들이 일부가 있다.
+
+따라서 GDP와 기대수명을 묶은 데이터를 기준으로 left_join 하여 기존에 189개 나라를 맞춰주도록 한다.
+
+인구 수 데이터에서 누락된 홍콩, 마케도니아, 스와질랜드, 타이완은 인구 수에서 NA가 나오는 것을 볼 수 있다.
+
+### 1-1. GDP & Life_expectancy's correlation
+```{r}
+now_df <- total_df %>% 
+            filter(time == '2021') %>% 
+            mutate(pop = POP * 0.00001)
+
+head(now_df)
+```
+
+GDP와 기대수명률 사이에 상관계수를 확인하기 위해 그래프를 그려보도록 한다.
+
+먼저 위에서 묶은 데이터는 1800년부터 2040년까지 있는 데이터이므로, 현재인 2021년을 기점으로 결과를 보도록 한다.
+
+또한 단순히 GDP와 기대수명률으로만 계산하지 않고, 인구 수도 함께 비교할 수 있도록 한다.
+
+```{r}
+cor_num <- cor(now_df$GDP, now_df$Life.expectancy, use = "all.obs", method = "pearson")
+
+now_df %>% 
+  ggplot(aes(x = GDP, y = Life.expectancy, label = name)) +
+  geom_point(aes(size = pop), alpha = 0.8) + 
+  geom_text(aes(label=ifelse(GDP > 60000, as.character(name), '')), size = 2, hjust=0, vjust=0) + 
+  geom_text(aes(label=ifelse(Life.expectancy < 59.5, as.character(name), '')), size = 2, hjust=0, vjust=0) + 
+  scale_size_continuous(
+    breaks = c(10, 300, 500, 1000, 5000, 10000)) + 
+  geom_smooth(method = lm) +
+  ggtitle('GDP per capita vs Life expectancy, 2021', 
+          subtitle = paste0('Pearson Correlation :', round(cor_num, 2))) + 
+  theme(plot.title = element_text(hjust=0.5))
+
+cor_num
+```
+
+X축을 GDP로, Y축을 기대수명으로 하여 그래프를 그려보면 다음과 같다.
+
+또한 scatter의 사이즈는 인구 수로 설정하여 함께 비교해보도록 한다.
+
+그리고 문제에 따라 피어슨 상관계수를 출력해보면, 약 0.69 정도의 값이 나오는 것을 볼 수 있다.
+
+상관계수와 함께 그래프에 있는 회귀선을 통해 확인할 수 있듯, GDP의 값이 증가할수록 기대수명도 증가하는 것을 알 수 있다.
+
+일반적으로 상관계수는 -1부터 1 사이의 값을 가지며, 1일때 높은 상관관계를 갖는다고 이야기한다.
+
+현재 GDP와 기대수명 사이에 상관계수는 0.69 정도의 값을 가지기 때문에 비교적 높은 상관관계를 갖는다고 할 수 있다.
+
+## 1-2. GDP(log) & Life_expectancy’s correlation
+```{r}
+now_df$GDP_log <- log(now_df$GDP)
+head(now_df)
+```
+
+monetary value는 log-normal 분포를 가지기 때문에 GDP에 log를 취한 값을 새로운 변수로 만든다.
+
+그 값을 위와 같이 head 함수로 새로운 변수가 만들어진 것을 확인할 수 있다.
+
+```{r}
+cor_num <- cor(now_df$GDP_log, now_df$Life.expectancy, use = "all.obs", method = "pearson")
+
+now_df %>% 
+  ggplot(aes(x = GDP_log, y = Life.expectancy, label = name)) +
+  geom_point(aes(size = pop), alpha = 0.8) + 
+  geom_text(aes(label=ifelse(GDP_log > 11.1, as.character(name), '')), size = 2, hjust=0, vjust=0) + 
+  geom_text(aes(label=ifelse(Life.expectancy < 59.5, as.character(name), '')), size = 2, hjust=0, vjust=0) + 
+  scale_size_continuous(
+    breaks = c(0, 10, 500, 1000, 10000)) + 
+  geom_smooth(method = lm) +
+  ggtitle('GDP(log) per capita vs Life expectancy, 2021', 
+          subtitle = paste0('Pearson Correlation :', round(cor_num, 2) ) ) + 
+  theme(plot.title = element_text(hjust=0.5))
+
+cor_num
+```
+
+그런 후에 GDP(log)에 대한 기대수명률 그래프를 위와 같이 그려보면 다음과 같다.
+
+또한 상관계수의 값을 출력해보면, 약 0.84의 값을 가지므로 log를 취하기 전보다 더 높은 상관관계를 보인다.
+
+그래프 상의 회귀선을 통해 확인할 수 있듯, GDP_log가 커질수록 기대수명도 증가하는 것을 확인할 수 있다.
+
+## 2-1. Distribution of COVID-19 Confirmers and Death by Continent
+```{r}
+str(covid_df)
+covid_df$date <- as.Date(covid_df$date)
+
+covid_df %>% 
+  filter(date == '2020-01-22', 
+         country == 'Afghanistan') %>% 
+  head()
+```
+
+대륙별로 코로나 확진자 수와 사망자 수를 그래프를 통해서 확인해보록 한다.
+
+가장 먼저 covid_df에 대하여 date 변수를 날짜 형태로 변환해주도록 한다.
+
+그리고 난 뒤에 한 날짜에 대하여 한 국가의 값을 확인해보면, type이 다른 3개의 값이 나오는 것을 볼 수 있다.
+
+이는 같은 날짜, 같은 국가에 대하여 서로 다른 type이 들어가 있으므로 tidy한 데이터가 아니다.
+
+따라서 type 변수에 대하여 spread를 통해 tidy 데이터 형태로 변환해주도록 한다.
+
+```{r}
+covid_df <- spread(covid_df, type, cases)
+
+covid_df %>% 
+  select(-province) %>% 
+  head()
+```
+
+이렇게 하면, 같은 날짜에 대하여 3개의 type들이 서로 다른 새로운 변수로 만들어지는 것을 확인할 수 있다.
+
+```{r}
+total_df <- total_df %>% 
+  mutate(name = replace(name, name == 'Congo, Rep.', 'Republic of Congo'), 
+         name = replace(name, name == 'Czech Republic', 'Czechia'), 
+         name = replace(name, name == 'Dominican Republic', 'Dominica'), 
+         name = replace(name, name == 'Lao', 'Laos'), 
+         name = replace(name, name == 'Micronesia, Fed. Sts.', 'Micronesia'), 
+         name = replace(name, name == 'Macedonia, FYR', 'North Macedonia'), 
+         name = replace(name, name == 'Slovak Republic', 'Slovakia'), 
+         name = replace(name, name == 'St. Lucia', 'Saint Lucia'), 
+         name = replace(name, name == 'St. Vincent and the Grenadines', 'Saint Vincent and the Grenadines'), 
+         name = replace(name, name == 'United States', 'USA'), 
+         name = replace(name, name == 'United Kingdom', 'UK'))
+
+covid_df <- total_df %>% 
+              filter(time %in% c(2020, 2021)) %>% 
+              group_by(name) %>% 
+              summarise(GDP = mean(GDP), 
+                        Life.expectancy = mean(Life.expectancy), 
+                        POP = mean(POP)) %>% 
+              right_join(covid_df, by = c('name' = 'country')) %>% 
+              select(date, name, lat, long, GDP, Life.expectancy, POP, confirmed, death, recovered)
+
+head(covid_df)
+```
+
+데이터를 merge 하기 전에, 표기법이 다른 일부 국가들에 대하여 국가 이름을 통일해주도록 한다.
+
+그리고 코로나 데이터가 2020년부터 2021년까지 있으므로, 앞선 total_df에서 2020년과 2021년만 추려서 GDP와 기대수명, 인구수의 평균을 구해준다.
+
+그 후에 코로나 데이터와 merge 시켜서 각 나라의 코로나 확진자 및 사망자 데이터와 함께 해당 국가의 GDP와 기대수명, 인구수를 알 수 있도록 한다.
+
+최종적으로 head 함수를 통해서 잘 merge가 되었는지 확인해볼 수 있다.
+
+```{r}
+covid_df %>% 
+  group_by(name) %>% 
+  mutate(confirmed_cumsum = cumsum(replace_na(confirmed, 0)), 
+         death_cumsum = cumsum(replace_na(death, 0)),
+         recovered_cumsum = cumsum(replace_na(recovered, 0))) %>% 
+  filter(date == '2021-05-27', name == 'Australia')
+```
+
+가장 현재 날짜인 2021년 5월 27일을 기준으로 2020년 1월 22일부터 현재까지 cumsum 함수로 누적 확진자와 사망자 수를 구한다.
+
+한편, cumsum 함수는 NA가 있으면 NA를 반환하므로, replace_na 함수로 NA는 0으로 대체하도록 한다.
+
+하지만 위에서 확인할 수 있듯, 같은 나라이지만 province에 따라 다수의 행이 출력되는 국가들이 있었다.
+
+따라서 중복된 값을 제거하면서, 중복이 있는 경우에는 가장 마지막 값을 남겨두도록 한다.
+
+```{r}
+now_covid_df <- covid_df %>% 
+                  group_by(name) %>% 
+                  mutate(confirmed_cumsum = cumsum(replace_na(confirmed, 0)), 
+                         death_cumsum = cumsum(replace_na(death, 0)),
+                         recovered_cumsum = cumsum(replace_na(recovered, 0))) %>% 
+                  filter(date == '2021-05-27') %>% 
+                  group_by(name) %>%
+                  filter(row_number() == n()) %>% 
+                  select(-confirmed, -death, -recovered) %>% 
+                  left_join(code[, c('region', 'name')], by = 'name')
+
+head(now_covid_df)
+```
+
+위에서 확인한 알고리즘에서 filter(row_number() == n()) 함수를 추가하여 중복된 country는 가장 마지막을 남겨두도록 한다.
+
+또한 continent 데이터를 함께 merge 하여 대륙 정보도 함께 추가하도록 한다.
+
+이를 통해 중복된 값이 없이, 192개 국가에 대한 데이터가 잘 출력된 것을 볼 수 있다.
+
+```{r}
+now_covid_df[is.na(now_covid_df$region), ]
+```
+
+```{r}
+now_covid_df[now_covid_df$name == 'USA', ]$region <- 'Americas'
+now_covid_df[now_covid_df$name == 'UK', ]$region <- 'Europe'
+now_covid_df[now_covid_df$name == 'Kiribati', ]$region <- 'Oceania'
+now_covid_df[now_covid_df$name == 'Timor-Leste', ]$region <- 'Asia'
+now_covid_df[now_covid_df$name == 'Burma', ]$region <- 'Asia'
+now_covid_df[now_covid_df$name == 'Cabo Verde', ]$region <- 'Africa'
+now_covid_df[now_covid_df$name == 'Republic of Congo', ]$region <- 'Africa'
+now_covid_df[now_covid_df$name == 'Micronesia', ]$region <- 'Oceania'
+now_covid_df[now_covid_df$name == 'West Bank and Gaza', ]$region <- 'Asia'
+```
+
+한편, region가 NA인 값들도 나오게 되어 확인해보았다.
+
+대부분의 국가들이 처음 들어보는 낯선 국가들이었는데, USA와 UK는 줄임 표현 때문에 인식을 못한 것으로 생각되었다.
+
+따라서 이들을 각각 검색하여 알맞은 대륙으로 채워주도록 한다.
+
+그럼에도 NA로 남는 국가들은, 확인해보니 국가가 아니라 배(ship)나 선박 등인 것을 확인할 수 있었다.
+
+```{r}
+now_covid_df$confirmed_per_10k <- now_covid_df$confirmed_cumsum / (now_covid_df$POP / 10000)
+now_covid_df$death_per_10k <- now_covid_df$death_cumsum / (now_covid_df$POP / 10000)
+now_covid_df$recovered_per_10k <- now_covid_df$recovered_cumsum / (now_covid_df$POP / 10000)
+
+now_covid_df <- na.omit(now_covid_df)
+
+head(now_covid_df)
+```
+
+그리고 누적 확진자 수와 인구 수를 통해서 인구 만 명당 확진자 수와 사망자 수를 확인하도록 한다.
+
+각각에 대하여 새로운 열을 만들어주고, head 함수로 새로운 변수들이 잘 만들어졌는지 확인하도록 한다
+
+```{r}
+now_covid_df %>% 
+  filter(!is.na(confirmed_per_10k)) %>% 
+  ggplot(aes(x = reorder(region, -confirmed_per_10k), y = confirmed_per_10k)) +
+  geom_boxplot(aes(color = region)) + 
+  geom_jitter(aes(color = region), position=position_jitter(width=0.3, height=0.2), size=0.5) +
+  ggtitle('Confirmed_cumsum by continent, 2021-05-27') + 
+  xlab('Continent') +
+  theme(plot.title = element_text(hjust=0.5), 
+        axis.text.x=element_text(angle=40, hjust=1))
+```
+
+```{r}
+now_covid_df %>% 
+  filter(!is.na(death_per_10k)) %>% 
+  ggplot(aes(x = reorder(region, -death_per_10k), y = death_per_10k)) +
+  geom_boxplot(aes(color = region)) + 
+  geom_jitter(aes(color = region), position=position_jitter(width=0.3, height=0.2), size=0.5) +
+  ggtitle('Death_cumsum by continent, 2021-05-27') + 
+  xlab('Continent') +
+  theme(plot.title = element_text(hjust=0.5), 
+        axis.text.x=element_text(angle=40, hjust=1))
+```
+
+단위 수가 너무 크기 때문에 인구 만 명당 누적 확진자와 사망자 수를 확인한다. 최종적으로 이를 대륙 별로 boxplot을 통해 그 분포를 확인하도록 한다.
+
+전반적으로 누적 확진자와 사망자 수의 분포는 비슷한 모양을 보인다. 이를 각 대륙별 평균값으로 확인해보면 다음과 같다.
+
+```{r}
+now_covid_df %>% 
+  filter(!is.na(confirmed_per_10k)) %>% 
+  group_by(region) %>% 
+  summarise(mean_confirmed = mean(confirmed_per_10k), 
+            mean_death = mean(death_per_10k)) %>% 
+  arrange(desc(mean_confirmed))
+```
+누적 확진자와 사망자 수의 평균은 유럽 - 아메리카 - 아시아 - 아프리카 - 오세아니아 순서를 보인다.
+
+이를통해 전반적으로 유럽과 아메리카 대륙에서 확진자와 사망자 수가 많았다는 것을 확인할 수 있다.
+
+## 3-1, 3-2 Comparison of COVID-19 situation by countries
+### CASE 1. 누적 확진자와 사망자 수가 많았던 상위 5개 국가에 대한 분석
+```{r}
+top_confirmed_countries <- now_covid_df %>% 
+                            arrange(desc(confirmed_cumsum)) %>% 
+                            select(name) %>% 
+                            head(5) %>% 
+                            as.matrix() %>% 
+                            c()
+
+top_death_countries <- now_covid_df %>% 
+                         arrange(desc(death_cumsum)) %>% 
+                         select(name) %>% 
+                         head(5) %>% 
+                         as.matrix() %>% 
+                         c()
+
+top_confirmed_countries
+
+top_death_countries
+```
+
+그렇다면, 국가 별로 코로나 바이러스의 상황을 비교하기 위해 추가적인 시각화를 수행해보도록 한다.
+
+먼저는 가장 최근 날짜 (2021-05-27) 기준으로 누적 확진자와 사망자 수가 많았던 상위 5개 국가들에 대해 Daily 변화 추이를 그래프로 확인한다.
+
+이를 위해서 누적 확진자와 누적 사망자 수의 상위 5개 국가들을 각각 출력하여 확인해보도록 한다.
+
+누적 확진자 수가 가장 많았던 상위 5개 국가는 미국, 인도, 브라질, 프랑스, 터키였다.
+
+또한 누적 사망자 수가 가장 많았던 상위 5개 국가는 미국, 브라질, 인도, 멕시코, 영국이었다.
+
+미국과 브라질, 멕시코가 아메리카 대륙으로 속한 것으로 보아 2번 과정에서 아메리카 대륙이 상위에 속한 이유들에 대해 다시 생각해볼 수 있다.
+
+```{r warning=FALSE}
+covid_df %>% 
+  filter(name %in% top_confirmed_countries) %>% 
+  group_by(name, date) %>%
+  filter(row_number() == n()) %>% 
+  ggplot(aes(x = date, y = confirmed, group = name)) + 
+  geom_line(aes(color = name)) + 
+  geom_vline(xintercept = as.numeric(ymd("2020-12-14")), 
+             color = 'black', size = 1) + 
+  geom_text(aes(x = as.Date('2020-11-01'), y = 600000, label = 'First vaccine injection'), 
+            size = 4, vjust = 0, hjust = 0, nudge_x = 50, check_overlap = TRUE) +
+  scale_x_continuous(breaks = seq(min(covid_df$date), max(covid_df$date), by = 50)) + 
+  ggtitle('Distribution of daily confirmed for the top 5 countries') + 
+  theme(plot.title = element_text(hjust=0.5), 
+        axis.text.x=element_text(angle=30, hjust=1))
+```
+
+첫번째는 누적 확진자 수가 가장 많았던 미국, 인도, 브라질, 프랑스, 터키에 대하여 2020년 1월 22일부터 2021년 5월 27일까지 결과를 확인한다.
+
+먼저는 누적이 아닌, 각 날짜별로 확진자가 얼마나 나왔는지를 line 그래프를 통해서 확인해보도록 한다.
+
+그래프에 대한 설명을 하기 전에 확진자 수이긴 한데, 데이터 상에서 음수를 표현하는 값들이 있다.
+
+해당 값들은 Outlier인지, 아니면 확진 되었다가 회복되었는지 등 특별히 알 수 있는 방법이 없어 우선 그대로 두도록 했다.
+
+인터넷 기사를 확인해보니, 코로나 19 백신이 2020년 12월 14일에 미국에서 처음으로 투여되었다고 한다. 따라서 이 날짜를 선으로 표시했다.
+
+미국은 확진자 수의 추이가 2020년 10월 들어서 급격히 증가하다가, 백신의 영향인지는 몰라도 백신 투여 후 점차적으로 줄어드는 모습을 보인다.
+
+한편, 인도의 경우에는 비교적 잘 통제가 되고 있다가 2021년 4월 들어서 급격하게 확진자 수가 증가하는 추이를 보인다.
+
+또한 터키는 2020년 12월에 들어서 급격하게 확진자 수가 증가했다가 급격히 감소하는 추이를 보이는데, 이는 정상 값인지 확인해볼 필요가 있을 것 같다.
+
+일반적으로 확진 추이가 갑자기 증가 또는 감소 추세가 나오기 보다는 몇 주 동안은 그 추세가 유지되기 때문이다.
+
+그렇다면, 이 국가들에 대하여 Daily로 확진자 수를 계속 더하여 그래프를 표현해보도록 한다.
+
+```{r warning=FALSE}
+covid_df %>% 
+  filter(name %in% top_confirmed_countries) %>% 
+  group_by(name) %>% 
+  mutate(csum_confirmed = cumsum(replace_na(confirmed, 0)), 
+         csum_death = cumsum(replace_na(death, 0)), 
+         csum_recovered = cumsum(replace_na(recovered, 0))) %>% 
+  group_by(name, date) %>%
+  filter(row_number() == n()) %>% 
+  ggplot(aes(x = date, y = csum_confirmed, group = name)) + 
+  geom_line(aes(color = name)) + 
+  geom_vline(xintercept = as.numeric(ymd("2020-12-14")), 
+             color = 'black', size = 1) + 
+  geom_text(aes(x = as.Date('2020-11-01'), y = 30000000, label = 'First vaccine injection'), 
+            size = 4, vjust = 0, hjust = 0, nudge_x = 50, check_overlap = TRUE) +
+  scale_x_continuous(breaks = seq(min(covid_df$date), max(covid_df$date), by = 50)) + 
+  ggtitle('Distribution of daily confirmed(cumsum) for the top 5 countries') + 
+  theme(plot.title = element_text(hjust=0.5), 
+        axis.text.x=element_text(angle=30, hjust=1))
+```
+
+위에서 이야기했던 것처럼 각 국가 별로 그 분포를 잘 확인할 수 있다.
+
+미국은 세계에서 확진자 수가 가장 많은 국가이며, 인도는 최근 들어서 급격하게 그 추이가 증가하는 것을 확인할 수 있다.
+
+또한 브라질은 꾸준히 확진자 수가 증가하는 모양을 확인할 수 있다. 그렇다면, 사망자 수의 추이는 어떻게 되는지 확인해보도록 한다.
+
+```{r warning=FALSE}
+covid_df %>% 
+  filter(name %in% top_death_countries) %>% 
+  group_by(name, date) %>%
+  filter(row_number() == n()) %>% 
+  ggplot(aes(x = date, y = death, group = name)) + 
+  geom_line(aes(color = name), alpha = 0.3) +
+  geom_ma(aes(color = name), ma_fun = SMA, n = 20, size = 1, linetype = 1) +
+  geom_vline(xintercept = as.numeric(ymd("2020-12-14")), 
+             color = 'black', size = 1) + 
+  geom_text(aes(x = as.Date('2020-11-01'), y = 4000, label = 'First vaccine injection'), 
+            size = 4, vjust = 0, hjust = 0, nudge_x = 50, check_overlap = TRUE) +
+  scale_x_continuous(breaks = seq(min(covid_df$date), max(covid_df$date), by = 50)) + 
+  ggtitle('Distribution of daily death number for the top 5 countries') + 
+  theme(plot.title = element_text(hjust=0.5), 
+        axis.text.x=element_text(angle=30, hjust=1))
+```
+
+그렇다면, 사망자 추이를 그래프로 표현해보도록 한다. 확인해보니 생각보다 너무 변동성이 커서 그래프를 확인하는데 약간의 어려움이 있었다.
+
+따라서 tidyquant 패키지에 있는 geom_ma 함수를 통해서 20일 이동평균선으로 값을 표현하도록 한다.
+
+기존의 사망자 추이 값은 alpha를 통해 약간 투명하게 표현했고, 이동평균선의 색을 더 진하게 표현하여 직관적으로 확인할 수 있도록 했다.
+
+결과를 확인해보면, 미국의 경우 첫 백신 접종 후부터 꾸준히 사망자 수가 감소하고 있는 것을 확인할 수 있다.
+
+한편, 인도는 2021년 4월 이후 사망자 수가 급증하고 있는 것도 확인할 수 있다.
+
+```{r}
+covid_df %>% 
+  filter(name %in% top_death_countries) %>% 
+  group_by(name) %>% 
+  mutate(csum_confirmed = cumsum(replace_na(confirmed, 0)), 
+         csum_death = cumsum(replace_na(death, 0)), 
+         csum_recovered = cumsum(replace_na(recovered, 0))) %>% 
+  group_by(name, date) %>%
+  filter(row_number() == n()) %>% 
+  ggplot(aes(x = date, y = csum_death, group = name)) + 
+  geom_line(aes(color = name)) + 
+  geom_vline(xintercept = as.numeric(ymd("2020-12-14")), 
+             color = 'black', size = 1) + 
+  geom_text(aes(x = as.Date('2020-11-01'), y = 600000, label = 'First vaccine injection'), 
+            size = 4, vjust = 0, hjust = 0, nudge_x = 50, check_overlap = TRUE) +
+  scale_x_continuous(breaks = seq(min(covid_df$date), max(covid_df$date), by = 50)) + 
+  ggtitle('Distribution of daily death number(cumsum) for the top 5 countries') + 
+  theme(plot.title = element_text(hjust=0.5), 
+        axis.text.x=element_text(angle=30, hjust=1))
+```
+
+최종적으로는 누적 사망자 수를 확인해보도록 한다. 사망자 수가 가장 많은 국가는 미국이며, 브라질, 인도, 멕시코, 영국 순이라는 것을 알 수 있다.
+
+사망자 수의 추이에 대한 기울기를 살펴보면, 미국은 백신 접종 이후 그 기울기가 비교적 감소한 것을 확인할 수 있다.
+
+하지만 인도와 브라질은 아직 그 기세가 꺾이지 않은 것으로 보아 추가적인 대응책이 필요하다고 생각한다.
+
+### CASE 2. 나라별 만명당 확진자 및 사망자에 대한 분석
+```{r}
+now_covid_df %>% 
+  filter(!is.na(region)) %>% 
+  ggplot(aes(x = confirmed_per_10k, y= death_per_10k, col = region))+
+  geom_point(alpha = 0.4, size =2 )
+```
+
+알 수 있는 사실은 다음과 같다.
+
+- 유럽 대륙의 국가들이 confirmed_per_10k, death_per_10k 두 지표 모두 높은 위치를 차지한 국가가 많았다.
+
+- 아시아 대륙의 국가는 다른 대륙 국가와 비교했을 때, confirmed_per_10k에 비해 death_per_10k가 낮은 국가들이 많았다.
+
+- 아메리카 대륙의 국가는 다른 대륙 국가와 비교했을 때, confirmed_per_10k에 비해 death_per_10k가 낮은 국가들이 많았다.
+
+### CASE 3. GDP 수준에 따른 recovered / confirmed 관계 확인
+```{r}
+now_covid_df <- now_covid_df %>% 
+                  mutate(recovered_per_confirmed = (recovered_per_10k/confirmed_per_10k)*100)
+
+now_covid_df %>% 
+  select(name, recovered_per_10k, confirmed_per_10k, recovered_per_confirmed) %>% 
+  arrange(desc(recovered_per_confirmed)) %>% 
+  head()
+```
+
+확진자 대비 완치자를 recovered_per_confirmed라는 새로운 변수로 만들어준다.
+
+이는 새롭게 확진되는 사람에 비해 얼마나 완치가 되고 있는지를 보인다고 할 수 있다.
+
+하지만 이 수치를 보면, 확진자와 완치자 수가 너무 적어서 높게 나오는 경우들이 있었는데, 많은 수는 아니므로 그대로 두고 분석하도록 한다.
+
+```{r}
+now_covid_df %>%
+  filter(!is.na(region)) %>%
+  ggplot(aes(x = GDP, y= recovered_per_confirmed, col = region))+
+  geom_point(alpha = 0.4, size =2)
+```
+
+그리고 X축을 GDP, Y축을 recovered_per_confirmed로 하여 그래프를 그려본다.
+
+전반적으로 GDP가 낮은 국가들이 이 수치가 높은 것을 확인할 수 있었다.
+
+```{r warning = FALSE}
+now_covid_df %>%
+  filter(!is.na(region)) %>%
+  ggplot(aes(x = GDP, y= recovered_per_confirmed, col = region))+
+  geom_point()+
+  geom_text(aes(label = name), size = 3, vjust=-0.7, hjust=0.7)+
+  scale_x_continuous("GDP", limits = c(30000, 80000))+
+  scale_y_continuous("recovered/confirmed", limits = c(0, 25))
+```
+
+그렇다면, GDP는 크지만 이 수치가 작은 국가 즉, 생활수준은 높지만 코로나에 잘 대응하지 못하는 국가를 확인해보도록 했다.
+
+결과를 보면, 아일랜드의 일인당 GDP는 7만불 이상이지만 recovered/confirmed 수치가 확연히 낮은 것을 볼 수 있다.
+
+### CASE 4. 나라별 만명당 확진자 및 사망자 지도로 시각화
+```{r, warning=FALSE}
+world_map <- map_data('world')
+
+ggplot() +
+  geom_polygon(data=world_map, aes(x=long, y=lat, group=group), fill = "white", color = "black") +
+  theme_bw() +
+  geom_point(data = now_covid_df, 
+             aes(x=long, y=lat, color = now_covid_df$confirmed_per_10k, size = now_covid_df$GDP), alpha = 0.8) +
+  scale_color_gradient(low="grey", high="red") + 
+  coord_fixed(ratio = 1.5) +
+  theme(legend.position = "none") +
+  ggtitle("Confirmed in correlation with gdp") + 
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+```{r}
+ggplot() +
+  geom_polygon(data=world_map, aes(x=long, y=lat, group=group), fill = "white", color = "black") +
+  theme_bw() +
+  geom_point(data = now_covid_df, 
+             aes(x=long, y=lat, color = now_covid_df$death_per_10k, size = now_covid_df$GDP), alpha = 0.8) +
+  scale_color_gradient(low="grey", high="red") + 
+  coord_fixed(ratio = 1.5) +
+  theme(legend.position = "none") +
+  ggtitle("Death in correlation with gdp") + 
+  theme(plot.title = element_text(hjust=0.5))
+```
+
+동그라미가 빨간색에 가까울 수록 만명당 확진자 그리고 사망자 수가 높은 것을 뜻하고, 동그라미의 크기가 그 나라의 GDP 상황을 말해준다.
+
+위에서 본것처럼 유럽 국가들의 만명당 확진자 수, 만명당 사망자 수가 높은 것을 직관적으로 확인할 수 있다.
+
+또한 아프리카와 아시아는 코로나 확진과 사망에 대한 낮은 추세를 보여 준다.
+
+이는 아시아는 GDP가 높은 반면, 아프리카는 낮은 GDP를 보여줌으로 GDP는 코로나에 큰 영향을 끼치는 요인이 아닐 수 있다는 것을 볼 수 있다.

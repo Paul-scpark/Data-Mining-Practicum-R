@@ -1,0 +1,559 @@
+---
+title: "Practice8"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(readxl)
+library(stringr)
+library(Metrics)
+set.seed(2021)
+options("scipen" = 1000)
+```
+
+### 직접 구현한 Linear Regression 알고리즘 정의
+```{r}
+Linear_regression <- function(df, feature_col, actual_col, t0, t1, alpha, iter_num){
+  # (1) Hypothesis 설정
+  h <- function(feature_col, t0, t1){
+    t0 + t1 * df[, feature_col]
+  }
+  
+  # (2) Cost 함수 설정
+  cost_J <- function(df, feature_col, actual_col, t0, t1){
+    1/(2*nrow(df)) * sum( (h(feature_col, t0, t1) - df[, actual_col]) ** 2 )
+  }
+  
+  # (3) 처음에 설정한 theta0, theta1을 통해서 나온 Cost 함수 결과로 output_df 틀 만들기
+  output_df <- data.frame(iter = 0, t0 = t0, t1 = t1, alpha = alpha,
+                          cost = cost_J(df, feature_col, actual_col, t0, t1))
+  
+  # (4) iteration 횟수만큼 학습하면서 output_df에 결과 누적시키기
+  for (i in 1:iter_num){
+    derivative0 <- alpha * mean( h(feature_col, t0, t1) - df[, actual_col] )
+    derivative1 <- alpha * mean( (h(feature_col, t0, t1) - df[, actual_col]) * df[, feature_col] )
+    
+    t0 <- t0 - derivative0
+    t1 <- t1 - derivative1
+    
+    output_df <- rbind(output_df, c(i, t0, t1, alpha, cost_J(df, feature_col, actual_col, t0, t1)))
+    
+    # (5) Cost 함수의 감소 폭이 10e-4 보다 작으면 iteration 횟수와 상관 없이 학습 중단
+    if (output_df$cost[nrow(output_df) - 1] - output_df$cost[nrow(output_df)] <= 10e-4){break}
+  }
+  
+  return (output_df)
+}
+```
+
+단변량 변수의 Linear Regression 알고리즘의 학습 과정은 다음과 같다.
+
+1. 가설(h)과 비용함수(J)를 설정하도록 한다.
+2. 비용함수는 1/2m * sum( (예측값 - 실제값) ** 2 )로 계산하도록 한다.
+3. 임의의 theta0과 theta1을 설정하고, 값을 대입하여 비용함수 값을 계산한다.
+4. 궁극적으로는 이 비용함수를 최소화 시키도록 하는 theta0과 theta1를 찾도록 한다.
+5. 이를 위해서 현재의 theta0과 theta1 각각에서 접선의 기울기를 계산하여 해당 값들을 업데이트해준다.
+6. 바뀐 theta0과 theta1을 활용하여 비용함수 값을 계산하고, 이 값을 최소화 할때까지 반복한다.
+
+## 1. alpha 값을 변경하여 학습 과정 확인하기
+```{r, echo=FALSE}
+Linear_regression <- function(df, feature_col, actual_col, t0, t1, alpha, iter_num){
+  # (1) Hypothesis 설정
+  h <- function(feature_col, t0, t1){
+    t0 + t1 * df[, feature_col]
+  }
+  
+  # (2) Cost 함수 설정
+  cost_J <- function(df, feature_col, actual_col, t0, t1){
+    1/(2*nrow(df)) * sum( (h(feature_col, t0, t1) - df[, actual_col]) ** 2 )
+  }
+  
+  # (3) 처음에 설정한 theta0, theta1을 통해서 나온 Cost 함수 결과로 output_df 틀 만들기
+  output_df <- data.frame(iter = 0, t0 = t0, t1 = t1, alpha = alpha,
+                          cost = cost_J(df, feature_col, actual_col, t0, t1))
+  
+  # (4) iteration 횟수만큼 학습하면서 output_df에 결과 누적시키기
+  for (i in 1:iter_num){
+    derivative0 <- alpha * mean( h(feature_col, t0, t1) - df[, actual_col] )
+    derivative1 <- alpha * mean( (h(feature_col, t0, t1) - df[, actual_col]) * df[, feature_col] )
+    
+    t0 <- t0 - derivative0
+    t1 <- t1 - derivative1
+    
+    output_df <- rbind(output_df, c(i, t0, t1, alpha, cost_J(df, feature_col, actual_col, t0, t1)))
+    
+    # (5) Cost 함수의 감소 폭이 10e-4 보다 작으면 iteration 횟수와 상관 없이 학습 중단
+    # if (output_df$cost[nrow(output_df) - 1] - output_df$cost[nrow(output_df)] <= 10e-4){break}
+  }
+  
+  return (output_df)
+}
+```
+
+```{r}
+path <- 'https://raw.githubusercontent.com/Paul-scpark/Data_Mining_Practicum/main/data/'
+exData <- read.csv(paste0(path, 'ex1data1.txt'), header = F, col.names = c('pop', 'profit'))
+
+head(exData)
+```
+
+주어진 데이터를 부르고, head 부분만 확인해보도록 한다.
+
+```{r}
+# alpha_vec <- c(0.001, 0.005, 0.01, 0.05, 0.1, 1)
+alpha_vec <- c(0.0001, 0.001, 0.005, 0.01)
+alpha_list <- list()
+for (alpha in alpha_vec){
+  alpha_list[[paste0('alpha_', alpha)]] <- Linear_regression(exData, 'pop', 'profit', 0, 1, alpha, 1500)
+}
+
+total_df <- data.frame()
+for (i in alpha_list){
+  total_df <- rbind(total_df, i[, c('iter', 'cost', 'alpha')])
+}
+
+table(total_df$alpha)
+head(total_df)
+```
+
+위에서 정의했던 linear_regression 함수를 활용하여 alpha 값을 바꾸면서 결과 데이터프레임을 list에 할당한다.
+
+그리고 나서는 alpha 값에 따른 결과를 확인하기 위하여 alpha에 따른 iter와 cost 값을 추려서 total_df에 할당한다.
+
+그 후에 table과 head 함수로 각 데이터의 개수와 값들이 잘 들어갔는지 확인해보도록 한다.
+
+```{r}
+total_df %>% 
+  filter(cost != Inf) %>% 
+  ggplot(aes(x = iter, y = cost, color = as.factor(alpha))) + 
+  geom_line()
+
+total_df %>% 
+  filter(iter == max(iter))
+```
+
+그리고 나서 최종적으로 alpha 값에 따라서 iter 횟수를 x축으로, cost 값을 y축으로 하는 그래프를 그린다.
+
+Learning rate를 의미하는 alpha 값이 0.01 보다 커지는 경우에는 너무 학습률이 크기 때문에 cost 함수의 값이 더 커지는 결과가 나왔다.
+
+따라서 0.001, 0.005, 0.01 이라는 alpha 값으로 결과를 확인해보았다.
+
+전반적으로 결과를 보면, 학습률이 가장 작았던 0.0001의 경우에는 반복 횟수가 약 250번 정도 일때부터 cost가 떨어지지 않고 있다.
+
+학습률이 0.001인 경우에는 1500번을 반복했음에도 여전히 어느 일정 수준에 수렴하지 못하는 형태를 볼 수 있다.
+
+한편, 0.005나 0.01의 학습률은 1500번 정도의 반복을 통해서 점차적으로 Cost 함수가 줄고 있음을 확인할 수 있다.
+
+alpha 값에 따라서 1500번 학습한 cost 결과를 출력해보면, 위와 같은 결과를 확인할 수 있다.
+
+## 2. Cost 함수의 결과값의 감소폭이 둔화되는 경우에 학습을 중단하기
+```{r, echo=FALSE}
+Linear_regression <- function(df, feature_col, actual_col, t0, t1, alpha, iter_num){
+  # (1) Hypothesis 설정
+  h <- function(feature_col, t0, t1){
+    t0 + t1 * df[, feature_col]
+  }
+  
+  # (2) Cost 함수 설정
+  cost_J <- function(df, feature_col, actual_col, t0, t1){
+    1/(2*nrow(df)) * sum( (h(feature_col, t0, t1) - df[, actual_col]) ** 2 )
+  }
+  
+  # (3) 처음에 설정한 theta0, theta1을 통해서 나온 Cost 함수 결과로 output_df 틀 만들기
+  output_df <- data.frame(iter = 0, t0 = t0, t1 = t1, alpha = alpha,
+                          cost = cost_J(df, feature_col, actual_col, t0, t1))
+  
+  # (4) iteration 횟수만큼 학습하면서 output_df에 결과 누적시키기
+  for (i in 1:iter_num){
+    derivative0 <- alpha * mean( h(feature_col, t0, t1) - df[, actual_col] )
+    derivative1 <- alpha * mean( (h(feature_col, t0, t1) - df[, actual_col]) * df[, feature_col] )
+    
+    t0 <- t0 - derivative0
+    t1 <- t1 - derivative1
+    
+    output_df <- rbind(output_df, c(i, t0, t1, alpha, cost_J(df, feature_col, actual_col, t0, t1)))
+    
+    # (5) Cost 함수의 감소 폭이 10e-4 보다 작으면 iteration 횟수와 상관 없이 학습 중단
+    if (output_df$cost[nrow(output_df) - 1] - output_df$cost[nrow(output_df)] <= 10e-4){break}
+  }
+  
+  return (output_df)
+}
+```
+
+```{r}
+alpha_vec <- c(0.0001, 0.001, 0.005, 0.01, 0.05)
+alpha_list <- list()
+for (alpha in alpha_vec){
+  alpha_list[[paste0('alpha_', alpha)]] <- Linear_regression(exData, 'pop', 'profit', 0, 1, alpha, 1500)
+}
+
+total_df <- data.frame()
+for (i in alpha_list){
+  total_df <- rbind(total_df, i[, c('iter', 'cost', 'alpha')])
+}
+
+table(total_df$alpha)
+head(total_df)
+```
+
+이번에는 Cost 함수의 감소폭이 10e-4 (충분히 작은 값) 보다 더 작은 경우에는 iteration 횟수와 상관 없이 학습을 중단하도록 한다.
+
+이를 통해서 결과를 확인해보면, 기존 1번에서는 모든 alpha에 대하여 데이터 개수가 1501개였지만, 지금은 모두 다른 것을 볼 수 있다.
+
+앞서 언급했던 것처럼 학습률이 0.005나 0.01 정도일때, 어느 정도 학습하면 Cost 함수의 값이 수렴하는 것을 유추해볼 수 있다.
+
+```{r}
+total_df %>% 
+  filter(cost != Inf) %>% 
+  ggplot(aes(x = iter, y = cost, color = as.factor(alpha))) + 
+  geom_line()
+
+total_df %>% 
+  group_by(alpha) %>% 
+  filter(iter == max(iter))
+```
+
+이를 그래프로 표현하면 위와 같음을 확인할 수 있다.
+
+전반적으로 0.005, 0.01 정도의 학습률이 충분히 학습이 되면서 cost 함수의 결과값도 꾸준히 감소하는 것을 확인할 수 있다.
+
+학습률이 너무 컸던 0.05의 경우에는 Cost 값이 감소하지 않은 상태에서 학습이 중단되었다.
+
+또한 학습률이 너무 작았던 0.0001의 경우에는 200번 정도 학습한 경우 그 감소폭이 너무 둔화되어 학습이 중단되었다.
+
+따라서 이 결과에서도 1번과 동일하게 0.005나 0.01 정도의 alpha 값일때 학습이 잘 이뤄진다는 것을 확인할 수 있다.
+
+## 3. 다변량 변수의 Linear Regression
+```{r}
+exData2 <- read.csv(paste0(path, 'ex1data2.txt'), header = F, col.names = c('size', 'num_bedroom', 'price'))
+summary(exData2)
+```
+
+이번에는 단변량이 아닌 2개 이상의 변수를 활용한 다변량 Linear Regression에 대해서 알아보도록 한다.
+
+이를 위해서 집 값을 예측하는 데이터셋을 불러오고, 집의 크기와 방의 개수라는 2개 변수를 활용해보도록 한다.
+
+```{r}
+# normalization
+exData2 <- exData2 %>% 
+  mutate(size.norm = (size - mean(size)) / sd(size), 
+         num_bedroom.norm = (num_bedroom - mean(num_bedroom)) / sd(num_bedroom))
+
+featureDF <- exData2 %>% 
+  mutate(bias = 1) %>% 
+  select(bias, ends_with('norm')) %>% 
+  as.matrix()
+
+label_vector <- exData2$price
+```
+
+가장 먼저는 각 변수들의 scale이 다르기 때문에 평균과 표준편차를 활용하여 정규화를 실시해주도록 한다.
+
+그리고 정규화된 변수에 bias를 새로운 열로 하여 featureDF라는 매트릭스를 만들어준다.
+
+그 후에는 모델의 target 변수인 집 값을 의미하는 price 데이터를 label_vector로 미리 할당해준다.
+
+```{r}
+regression <- function(n, num_iter, alpha){
+  # (1) Hypothesis 설정
+  h <- function(x, theta_vector){ # x is feature vector
+    theta_vector %*% x            # inner product of two vectors
+  }
+  
+  # (2) Cost 함수 설정
+  cost_J <- function(theta_vector){
+    v <- as.matrix(featureDF) %*% theta_vector - label_vector
+    (t(v) %*% v / (2*nrow(featureDF)))[1, 1]
+    # 1 / 2 * mean(v ** 2)
+  }
+  
+  # (3) 처음에 설정한 theta_vector를 통해 나온 Cost 함수 결과로 output_df 틀 만들기
+  theta_vector <- c(0, 0, 0)
+
+  output_df <- data.frame(iter = 0, 
+                       t0 = theta_vector[1], 
+                       t1 = theta_vector[2], 
+                       t2 = theta_vector[3], 
+                       cost = cost_J(theta_vector), 
+                       alpha = alpha)
+  
+  # (4) iteration 횟수만큼 학습하면서 output_df에 결과 누적시키기
+  for (i in 1:num_iter){
+    v <- featureDF %*% theta_vector - label_vector
+    theta_update <- alpha / n * t(featureDF) %*% v
+    theta_vector <- theta_vector - theta_update
+    output_df <- rbind(output_df, c(i, theta_vector, cost_J(theta_vector), alpha))
+  }
+  
+  return (output_df)
+}
+```
+
+그리고 여러 개의 변수들을 활용하여 Linear Regerssion을 할 수 있도록 새로운 함수를 만들어주도록 한다.
+
+```{r}
+alpha_vec <- c(0.0001, 0.001, 0.005, 0.01, 0.05, 0.1, 1)
+alpha_list <- list()
+for (alpha in alpha_vec){
+  alpha_list[[paste0('alpha_', alpha)]] <- regression(nrow(featureDF), 1500, alpha)
+}
+
+total_df <- data.frame()
+for (i in alpha_list){
+  total_df <- rbind(total_df, i[, c('iter', 'cost', 'alpha')])
+}
+
+table(total_df$alpha)
+head(total_df)
+```
+
+위에서 정의한 regression 함수를 활용하여 alpha의 값을 바꿔가면서 list에 각 데이터들의 결과를 할당한다.
+
+그리고 나서는 iter, cost, alpha만 추려서 rbind를 하여 각 alpha 별로의 결과를 하나의 데이터프레임으로 만들어준다.
+
+이를 table 함수를 통해서 각 alpha 값에 대하여 데이터들이 몇 개씩 있는지 확인할 수 있고, head로 윗부분만 확인해본다.
+
+최종적으로는 이를 그래프로 표현하여 각 alpha 값에 대하여 cost 값의 변화 추이를 확인해보도록 한다.
+
+```{r}
+label_ko_num <- function(num){
+  ko_num <- function(x){
+    new_num <- x %/% 10**10
+    return(paste(new_num, 'x10^10', sep = ''))
+  }
+  return(sapply(num, ko_num))
+}
+
+total_df %>% ggplot(aes(x = iter, y = cost, color = as.factor(alpha))) +
+  geom_line() +
+  scale_y_continuous(labels = label_ko_num)
+
+total_df %>% 
+  filter(iter == max(iter))
+```
+
+alpha 값에 따른 cost 값 변화 그래프는 위와 같음을 확인할 수 있다.
+
+가장 먼저 학습률이 가장 작은 0.001과 같은 경우에는 iter 횟수가 커질때마다 cost 값의 변화율이 상당히 크다.
+
+한편, 학습률이 큰 1, 0.1, 0.05와 같은 경우에는 iter 횟수가 100번도 채 되지 않아서 특정 값에 수렴하는 것을 확인할 수 있다.
+
+그나마 0.01, 0.005는 계속해서 cost 값이 감소되면서 약 250번 정도 학습시켰을때 cost가 특정 값에 수렴하고 있다.
+
+## 4. 직접 구현한 알고리즘을 활용하여 부동산 가격 예측
+```{r}
+real_estate <- read_excel('Real_estate_valuation.xlsx')
+
+# Simple Preprocessing
+real_estate <- real_estate[, c(-1, -2, -6, -7)]
+colnames(real_estate) <- c('House_age', 'Distance_MRT', 'Number_of_stores', 'Price')
+
+real_estate <- real_estate %>% 
+  mutate(House_age = (House_age - mean(House_age)) / sd(House_age), 
+         Distance_MRT = (Distance_MRT - mean(Distance_MRT)) / sd(Distance_MRT), 
+         Number_of_stores = (Number_of_stores - mean(Number_of_stores)) / sd(Number_of_stores))
+
+head(real_estate)
+```
+
+이번에는 위에서 구현했던 Linear Regression 함수를 직접 부동산 데이터셋에 적용해보도록 한다.
+
+주어진 데이터를 부르고, 학습에 사용할 'House_age', 'Distance_MRT', 'Number_of_stores', 'Price' 변수들만 추리도록 한다.
+
+그리고 나서 각 변수들의 scale이 모두 다르기 때문에 정규화까지 진행하고, head 함수로 결과를 확인해본다.
+
+```{r}
+# Splitting train, test dataset
+train_idx <- sample(1:nrow(real_estate), size = 0.8 * nrow(real_estate), replace = F)
+test_idx <- setdiff(1:nrow(real_estate), train_idx)
+
+train_df <- real_estate[train_idx, ]
+test_df <- real_estate[test_idx, ]
+
+dim(train_df)
+dim(test_df)
+
+featureDF <- train_df %>% 
+  mutate(bias = 1) %>% 
+  select(-Price) %>% 
+  as.matrix()
+
+label_vector <- train_df$Price
+```
+
+그 후에는 모델을 직접 학습하고, 결과를 확인해야 하기 때문에 train과 test 데이터셋으로 나눠주도록 한다.
+
+sample 함수를 통해서 임의로 선택한 80%를 train으로, 나머지 20%를 test로 할당해주도록 한다.
+
+결과를 확인해보면, 기존 414개 데이터 중에서 약 80%에 해당하는 331개의 데이터가 train으로, 나머지 20%의 83개가 test로 할당되었다.
+
+그 후에는 모델을 학습하기 위해서 bias 열을 추가해주고, target 변수인 price는 label_vector로 따로 빼주도록 한다.
+
+```{r}
+regression <- function(feature_df, label, n, num_iter, alpha){
+  # (1) Hypothesis 설정
+  h <- function(x, theta_vector){ # x is feature vector
+    theta_vector %*% x            # inner product of two vectors
+  }
+  
+  # (2) Cost 함수 설정
+  cost_J <- function(theta_vector){
+    v <- as.matrix(feature_df) %*% theta_vector - label
+    (t(v) %*% v / (2*nrow(feature_df)))[1, 1]
+    # 1 / 2 * mean(v ** 2)
+  }
+  
+  # (3) feature_df의 열의 개수만큼 theta_vector를 정의해주고, Cost 함수 결과로 output_df 틀 만들기
+  theta_vector <- rep(0, ncol(feature_df))
+  
+  theta_df <- as.data.frame(t(as.data.frame(theta_vector)))
+  rownames(theta_df) <- 1
+  colnames(theta_df) <- str_replace(colnames(theta_df), 'V', 't')
+  
+  output_df <- data.frame(iter = 0, cost = cost_J(theta_vector), alpha = alpha)
+  output_df <- cbind(output_df, theta_df)
+  
+  # (4) iteration 횟수만큼 학습하면서 output_df에 결과 누적시키기
+  for (i in 1:num_iter){
+    v <- feature_df %*% theta_vector - label
+    theta_update <- alpha / n * t(feature_df) %*% v
+    theta_vector <- theta_vector - theta_update
+    output_df <- rbind(output_df, c(i, cost_J(theta_vector), alpha, theta_vector))
+  
+  # (5) Cost 함수의 감소 폭이 10e-4 보다 작으면 iteration 횟수와 상관 없이 학습 중단
+  if (output_df$cost[nrow(output_df) - 1] - output_df$cost[nrow(output_df)] <= 10e-4){break}
+  }
+  
+  return (output_df)
+}
+```
+
+위에서 정의했던 알고리즘을 조금 수정 및 보완하도록 한다. feature의 개수가 달라지다보니, theta의 개수가 달라질 수 밖에 없다.
+
+위 알고리즘에서는 theta를 3개로 고정했다보니, 오류가 있어서 feature의 개수만큼 theta_vector를 할당해주도록 했다.
+
+또한 이를 통해서 output_df도 theta_vector의 개수만큼 값이 들어가도록 했다.
+
+이번에는 학습하면서 cost 값이 일정 수준에서 감소하지 않으면, 학습을 중단하도록 했다.
+
+```{r}
+alpha_vec <- c(0.001, 0.005, 0.01, 0.05, 0.1, 1)
+alpha_list <- list()
+for (alpha in alpha_vec){
+  alpha_list[[paste0('alpha_', alpha)]] <- regression(featureDF, label_vector, nrow(featureDF), 1500, alpha)
+}
+
+total_df <- data.frame()
+for (i in alpha_list){
+  total_df <- rbind(total_df, i)
+}
+
+table(total_df$alpha)
+```
+
+위의 예시와 동일하게 0.001, 0.005, 0.01, 0.05, 0.1, 1 까지의 alpha 값으로 회귀 모델을 만들어서 결과를 저장했다.
+
+alpha 값에 따라서 중간에 cost의 감소폭이 작아서 학습이 일찍 중단된 결과도 확인할 수 있다.
+
+```{r}
+total_df %>% 
+  filter(cost != Inf) %>% 
+  ggplot(aes(x = iter, y = cost, color = as.factor(alpha))) + 
+  geom_line()
+```
+
+이 결과를 그래프로 표현하면 위와 같음을 확인할 수 있다.
+
+학습률이 너무 작았던 0.001의 경우에는 1500번을 수행했음에도 cost 값이 수렴하지 못한 것을 확인할 수 있다.
+
+0.005나 0.01 정도의 학습률이 충분히 학습이 되면서 cost 값도 일정 수준에 수렴하는 것을 볼 수 있다.
+
+```{r}
+total_df %>% 
+  group_by(alpha) %>% 
+  filter(iter == max(iter))
+
+theta <- total_df %>% 
+  filter(alpha == 0.01) %>% 
+  filter(iter == max(iter)) %>% 
+  select(t1, t2, t3, t4)
+
+theta
+```
+
+각 alpha 값 별로 iter의 최댓값을 추려서 결과를 확인해보면, 다음과 같음을 알 수 있다.
+
+이와 같은 과정을 수행했던 이유는 처음에 정의한 hypothesis에 들어갈 각 변수와 theta 값들을 찾기 위함이었다.
+
+즉, t1, t2, t3, t4의 값을 통해서 각 변수들과 곱해서 실제 price에 대한 예측 price 값을 계산해볼 수 있다는 것이다.
+
+위 결과를 통해서 cost가 충분히 작고, 학습도 적당히 됐다고 판단되는 alpha가 0.01 정도 일때의 theta를 활용해보고자 한다.
+
+이 theta 값들에 대해서 해석하면, 위에서 학습한 데이터들의 순서대로의 계수를 뜻한다고 할 수 있다.
+
+즉, t1부터 t3까지는 'House_age', 'Distance_MRT', 'Number_of_stores'의 계수를 뜻하고, t4는 bias 즉, y절편을 뜻한다고 할 수 있다.
+
+```{r}
+df <- test_df %>% 
+  mutate(bias = 1) %>% 
+  select(-Price)
+
+test_df <- test_df %>% 
+  mutate(price_predict = as.matrix(df) %*% unlist(theta, use.names = FALSE))
+
+head(test_df)
+output1 <- rmse(test_df$Price, test_df$price_predict)
+output1
+```
+
+이를 통해 test 데이터로부터 theta 값을 활용하여 price_predict 값을 계산해보도록 한다.
+
+위 결과를 head 함수로 출력해보았고, 최종적으로는 실제값과 예측값에 대한 RMSE를 계산해보았다.
+
+그 결과는 약 7.06 정도의 RMSE가 나온 것을 확인할 수 있다.
+
+## 5. Linear Regression 내장 함수 lm을 통한 결과 확인
+```{r}
+# train_df <- train_df[, c(-5)]
+test_df <- test_df[, c(-5)]
+
+model <- lm(Price ~ ., data = train_df)
+test_df <- test_df %>% 
+  mutate(price_predict = predict(model, newdata = test_df))
+
+head(test_df)
+output2 <- rmse(test_df$Price, test_df$price_predict)
+output2
+```
+
+이번에는 R에서 내장되어 있는 Linear Regression 함수인 lm 함수를 이용하여 결과를 확인해보고자 한다.
+
+확실히 위 과정보다는 간편하고, 단순한 것을 직관적으로 확인할 수 있었다.
+
+위 데이터와 동일한 trian과 test를 활용하고, target 변수인 Price에 대하여 전체 변수들을 학습해주도록 한다.
+
+그렇게 만들어진 model에 test 데이터에 대하여 predict한 결과를 price_predict로 할당해주도록 한다.
+
+4번과 동일하게 test 데이터에서의 실제값과 예측값에 대한 RMSE를 확인해보면, 약 7.1 정도의 값이 나오는 것을 볼 수 있다.
+
+이러한 과정을 통해서 자체적으로 구현한 4번과 lm 함수를 사용했던 5번의 결과가 거의 유사함을 확인할 수 있었다.
+
+```{r}
+theta_test <- t(as.data.frame(model$coefficients))
+rownames(theta_test) <- 'lm_function'
+
+theta <- theta[, c('t4', 't1', 't2', 't3')]
+rownames(theta) <- 'Own_algorithm'
+colnames(theta) <- colnames(theta_test)
+
+cbind(rbind(theta_test, theta), RMSE = rbind(output1, output2))
+```
+
+실제 각 모델들에 대하여 theta 값을 확인해보면 위와 같음을 볼 수 있다.
+
+RMSE 자체가 유사했던 것처럼 theta 값들 역시도 큰 차이 없이 두 모델에서 거의 유사하다는 것을 다시 확인할 수 있다.

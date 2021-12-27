@@ -1,0 +1,517 @@
+---
+title: "Practice 7"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+library(lubridate)
+library(corrplot)
+library(cowplot)
+library(rpart)
+library(rpart.plot)
+library(party)
+library(caret)
+library(e1071)
+library(adabag)
+library(randomForest)
+library(xgboost)
+theme_set(theme_grey(base_family='NanumGothic'))
+options("scipen" = 1000)
+```
+
+### Loading data
+```{r}
+train <- read.csv('movies_train.csv')
+test <- read.csv('movies_test.csv')
+
+dim(train)
+dim(test)
+```
+
+### 기본적인 전처리 수행
+```{r}
+str(train)
+```
+
+모델을 만들기 전에 기본적인 전처리를 수행해보도록 한다. 각 변수들의 특징을 확인하여 변수를 수정하거나, 추가하거나 등의 과정을 진행해본다.
+
+먼저 str 함수를 통해서 각 변수들의 타입과 전반적인 데이터를 확인해보고, 변수들의 특성들을 확인하면서 하나씩 전처리를 수행해본다.
+
+#### (1) 배급사(distributor) 전처리
+```{r}
+length(unique(train$distributor))
+
+train %>% 
+  filter(str_detect(distributor, '마인스')) %>% 
+  select(title, distributor, genre, director, box_off_num)
+```
+
+가장 먼저 distributor 변수에 대해 전처리를 수행해본다. train 데이터에 대하여 unique한 개수를 확인하면, 169개가 나온다.
+
+하지만 띄어쓰기나 같은 계열사지만 세부 이름이나 표기가 달라서 동일하게 구분되지 못한 변수들이 있다.
+
+예를 들면, 마인스 엔터테인먼트의 경우에는 중간에 띄어쓰기가 있는 데이터와 없는 데이터가 있어서 구분이 되어 있는 상태이다.
+
+따라서 공백을 모두 제거하고, (주)나 (유) 등과 같이 배급사 이름을 구분하는데 의미가 떨어지는 단어는 제거한다.
+
+```{r}
+remove <- c('[(주)]', '[(유)]', '[:blank:]') # Remove pattern
+
+train <- train %>% 
+  mutate(distributor = str_remove_all(distributor, paste(remove, collapse = "|")), 
+         distributor = ifelse(str_detect(distributor, '조이앤'), '조이앤시네마', 
+                         ifelse(str_detect(distributor, '싸이더스'), '싸이더스', 
+                            ifelse(str_detect(distributor, '쇼박스'), '쇼박스', 
+                               ifelse(str_detect(distributor, '마운틴픽쳐스'), '마운틴픽쳐스', 
+                                  ifelse(str_detect(distributor, 'CGV'), 'CGV아트하우스', 
+                                     ifelse(str_detect(distributor, 'E&M'), 'CJE&M영화부문', distributor)))))))
+
+test <- test %>% 
+  mutate(distributor = str_remove_all(distributor, paste(remove, collapse = "|")), 
+         distributor = ifelse(str_detect(distributor, '조이앤'), '조이앤시네마', 
+                         ifelse(str_detect(distributor, '싸이더스'), '싸이더스', 
+                            ifelse(str_detect(distributor, '쇼박스'), '쇼박스', 
+                               ifelse(str_detect(distributor, '마운틴픽쳐스'), '마운틴픽쳐스', 
+                                  ifelse(str_detect(distributor, 'CGV'), 'CGV아트하우스', 
+                                     ifelse(str_detect(distributor, 'E&M'), 'CJE&M영화부문', distributor)))))))
+
+length(unique(train$distributor))
+```
+
+stringr 패키지에 있는 str_remove_all과 str_detect 함수를 활용하도록 한다.
+
+(주)나 (유)가 있는 단어 그리고 공백들은 모두 제거한 후에, 배급사의 이름을 통일해주도록 한다.
+
+이를 통해서 기존에 169개였던 배급사가 152개로 정리된 것을 확인할 수 있다.
+
+또한 같은 전처리를 train 데이터 뿐 아니라, test 데이터에도 적용해주도록 한다.
+
+#### (2) 장르(genre)와 등급(screening_rat) 데이터 확인
+```{r}
+unique(train$genre)
+unique(test$genre)
+
+unique(train$screening_rat)
+unique(test$screening_rat)
+```
+
+train과 test 데이터에 있는 genre와 screening_rat 변수의 범주들을 확인해본다.
+
+결과를 보면, genre는 두 데이터 모두 12개씩 있으며 그 요소들도 모두 동일하다는 것을 알 수 있다.
+
+또한 screening_rat 변수도 모두 4개씩이고, 요소도 동일하다. 향후 이 변수는 dummy coding 처리를 해주도록 한다.
+
+#### (3) 개봉날짜(release_time), 상영시간(time), 감독(director) 데이터 확인
+
+개봉날짜와 감독 데이터는 dummy coding 하기에도 너무 많을 뿐 아니라, 영화 관객 수를 예측하는데 있어서 의미성이 조금 떨어진다고 생각한다.
+
+감독에 대한 정보는 과거 영화에 대한 관객 수나, 참여 횟수 등의 데이터가 있으므로 두 데이터 모두 모델링에는 사용하지 않도록 한다.
+
+또한 상영시간 데이터는 수치형 데이터로 향후에 영화 관객 수와 상관계수를 비교해보면서 얼마나 영향을 미치는지 결과를 보고, 결정하도록 한다.
+
+#### (4) 감독의 과거 영화에 대한 관객 수(dir_prev_bfnum) 전처리
+```{r}
+colSums(is.na(train))
+colSums(is.na(test))
+```
+
+감독의 과거 영화에 대한 관객 수 데이터는 이 데이터에서 유일하게 NA가 있는 변수이다.
+
+이 변수의 의미를 고려해보면, NA가 있는 이유가 해당 감독의 모든 영화가 트랙킹이 안됐거나, 첫번째 영화이거나 등의 이유라고 추론해볼 수 있다.
+
+NA의 값을 대체하기 위하여 train과 test 데이터에서 각 감독 별로 평균 관객 수를 구해서 같은 감독인 경우에는 NA를 대체해주도록 한다.
+
+```{r}
+dir_bfnum_mean <- 
+  bind_rows(train %>% select(director, dir_prev_bfnum), 
+            test %>% select(director, dir_prev_bfnum)) %>% 
+  group_by(director) %>% 
+  mutate(mean = mean(dir_prev_bfnum, na.rm = T)) %>% 
+  select(-dir_prev_bfnum) %>% 
+  arrange(desc(mean)) %>% 
+  filter(row_number() == 1)
+
+head(dir_bfnum_mean)
+
+train <- train %>% 
+  left_join(dir_bfnum_mean, by = 'director') %>% 
+  mutate(dir_prev_bfnum = ifelse(is.na(dir_prev_bfnum), mean, dir_prev_bfnum)) %>% 
+  mutate(dir_prev_bfnum = ifelse(is.na(dir_prev_bfnum), 1, dir_prev_bfnum)) %>% 
+  select(-mean)
+
+test <- test %>% 
+  left_join(dir_bfnum_mean, by = 'director') %>% 
+  mutate(dir_prev_bfnum = ifelse(is.na(dir_prev_bfnum), mean, dir_prev_bfnum)) %>% 
+  mutate(dir_prev_bfnum = ifelse(is.na(dir_prev_bfnum), 1, dir_prev_bfnum)) %>% 
+  select(-mean)
+```
+
+train과 test를 모두 포함하여 해당 감독의 평균 관객 수를 구한 후에 각 데이터에 merge 하여 평균값으로 대체해주도록 한다.
+
+그럼에도 불구하고, 값이 대체가 되지 않은 데이터는 해당 감독의 평균 관람객 수를 알기 어렵기 때문에 0으로 대체해준다.
+
+#### (5) 최종 모델링을 위한 새로운 데이터 만들기
+
+이제 전반적으로 각 변수들에 대해 기본적인 전처리는 완료했다.
+
+이렇게 수행했던 이유는 결국 영화 관람객 수를 예측하는 모델을 만들기 위함이다.
+
+따라서 모델링을 위하여 최종적으로 변수들을 수정 및 제거, 추가하는 과정을 수행하도록 한다. 그 전에 먼저 수치형 데이터들에 대해 전반적인 분포를 확인해본다.
+
+```{r fig.align='center'}
+hist1 <- train %>% 
+  select(box_off_num) %>% 
+  ggplot(aes(x = box_off_num)) + 
+  geom_histogram()
+
+hist2 <- train %>% 
+  select(box_off_num) %>% 
+  ggplot(aes(x = log(box_off_num))) + 
+  geom_histogram()
+
+title <- ggdraw() + 
+  draw_label('box_off_num vs log(box_off_num)')
+plot_grid(title, plot_grid(hist1, hist2), 
+          ncol = 1, rel_heights = c(0.1, 1))
+
+hist3 <- train %>% 
+  select(dir_prev_bfnum) %>% 
+  ggplot(aes(x = dir_prev_bfnum)) + 
+  geom_histogram()
+
+hist4 <- train %>% 
+  select(dir_prev_bfnum) %>% 
+  ggplot(aes(x = log(dir_prev_bfnum))) + 
+  geom_histogram()
+
+title <- ggdraw() + 
+  draw_label('dir_prev_bfnum vs log(dir_prev_bfnum)')
+plot_grid(title, plot_grid(hist3, hist4), 
+          ncol = 1, rel_heights = c(0.1, 1))
+
+hist5 <- train %>% 
+  select(num_staff) %>% 
+  ggplot(aes(x = num_staff)) + 
+  geom_histogram()
+
+hist6 <- train %>% 
+  select(num_staff) %>% 
+  ggplot(aes(x = log(num_staff))) + 
+  geom_histogram()
+
+title <- ggdraw() + 
+  draw_label('num_staff vs log(num_staff)')
+plot_grid(title, plot_grid(hist5, hist6), 
+          ncol = 1, rel_heights = c(0.1, 1))
+
+hist7 <- train %>% 
+  select(num_actor) %>% 
+  ggplot(aes(x = num_actor)) + 
+  geom_histogram()
+
+hist8 <- train %>% 
+  select(num_actor) %>% 
+  ggplot(aes(x = log(num_actor))) + 
+  geom_histogram()
+
+title <- ggdraw() + 
+  draw_label('num_actor vs log(num_actor)')
+plot_grid(title, plot_grid(hist7, hist8), 
+          ncol = 1, rel_heights = c(0.1, 1))
+
+train <- train %>% 
+  mutate(num_staff = ifelse(num_staff == 0, 1, num_staff), 
+         num_actor = ifelse(num_actor == 0, 1, num_actor)) %>% 
+  mutate(dir_prev_bfnum = log(dir_prev_bfnum), 
+         num_staff = log(num_staff), 
+         num_actor = log(num_actor), 
+         box_off_num = log(box_off_num))
+
+test <- test %>% 
+  mutate(num_staff = ifelse(num_staff == 0, 1, num_staff), 
+         num_actor = ifelse(num_actor == 0, 1, num_actor)) %>% 
+  mutate(dir_prev_bfnum = log(dir_prev_bfnum), 
+         num_staff = log(num_staff), 
+         num_actor = log(num_actor))
+```
+
+가장 먼저, target 변수인 관람객 수에 대한 변수를 히스토그램으로 표현해보았다.
+
+결과를 보면, 좌측 그래프가 전처리 수행 전 데이터인데, 오른쪽으로 꼬리가 긴 모양을 가지는 것을 볼 수 있다.
+
+즉, 양의 왜도의 값을 가지면서 확률분포가 비대칭성을 갖고, 정규분포의 모양과 상당히 거리가 있다는 것을 알 수 있다.
+
+따라서 이를 보완하기 위해 log를 취해서 비대칭성을 줄이고, 정규성을 높아지도록 한다. 최종으로도 log를 취한 변수로 활용한다.
+
+이는 관람객 수 변수를 비롯하여, 해당 감독의 과거 영화에서의 평균 관람객 수, 스텝의 수, 배우의 수에도 동일하게 적용한다.
+
+또한 최종적으로 target 변수는 다시 exponential을 취해줘서 마지막에는 값을 원상복구 시켜야 하는 것도 기억해야 한다.
+
+```{r}
+dist_median <- train %>% 
+  group_by(distributor) %>% 
+  summarise(median = median(box_off_num)) %>% 
+  arrange(median) %>% 
+  ungroup() %>% 
+  mutate(distributor_rank = 1:n()) %>% 
+  select(-median)
+
+genre_mean <- train %>% 
+  group_by(genre) %>% 
+  summarise(mean = mean(box_off_num)) %>% 
+  arrange(mean) %>% 
+  ungroup() %>% 
+  mutate(genre_rank = 1:n()) %>% 
+  select(-mean)
+
+train <- train %>% 
+  left_join(dist_median, by = 'distributor') %>% 
+  left_join(genre_mean, by = 'genre') %>% 
+  select(-title, -distributor, -director, -release_time, -genre)
+  
+test <- test %>% 
+  left_join(dist_median, by = 'distributor') %>% 
+  left_join(genre_mean, by = 'genre') %>% 
+  select(-distributor, -director, -release_time, -genre) %>% 
+  mutate(distributor_rank = ifelse(is.na(distributor_rank), 0, distributor_rank))
+
+str(train)
+str(test)
+```
+
+다음은 distributor와 genre 변수를 처리해주도록 한다. 앞선 과정을 통해 기본적인 전처리는 마무리 되었다.
+
+해당 변수 역시 범주형 변수이기 때문에 dummy coding 형태가 필요한데, 배급사와 장르 역시 영화 관람객 수에 중요한 변수이므로 이를 수치형으로 변환하고자 한다.
+
+따라서 train 데이터에 대하여 배급사와 장르를 기준으로 group_by하고, 관람객 수의 중위값과 평균값으로 순서를 정렬해서 rank를 매겨준다.
+
+결국 train 데이터에서 관람객 수가 많았던 배급사와 장르에 대해서는 distributor_rank와 genre_rank가 높을 것이다.
+
+이를 test 데이터에도 적용해주고, train 데이터에서 없었던 경우에는 NA 값을 0으로 대체해주도록 한다.
+
+```{r}
+train <- train %>% 
+  mutate(over_12 = ifelse(screening_rat == '12세 관람가', 1, 0), 
+         over_15 = ifelse(screening_rat == '15세 관람가', 1, 0), 
+         over_19 = ifelse(screening_rat == '청소년 관람불가', 1, 0), 
+         all = ifelse(screening_rat == '전체 관람가', 1, 0)) %>% 
+  select(-screening_rat)
+
+test <- test %>% 
+  mutate(over_12 = ifelse(screening_rat == '12세 관람가', 1, 0), 
+         over_15 = ifelse(screening_rat == '15세 관람가', 1, 0), 
+         over_19 = ifelse(screening_rat == '청소년 관람불가', 1, 0), 
+         all = ifelse(screening_rat == '전체 관람가', 1, 0)) %>% 
+  select(-screening_rat)
+
+str(train)
+str(test)
+```
+
+이제 마지막으로 남은 관람 등급 변수인 screening_rat 변수를 확인하도록 한다.
+
+해당 변수는 앞선 변수들과 동일하게 범주형 변수이지만, 크고 낮음을 평가하는 것이 어렵다.
+
+따라서 원칙적으로 수행했던 것처럼 dummy coding을 수행하여 각각에 대한 변수들을 만들어주도록 한다.
+
+그리고 최종적으로 구축된 데이터에 대하여 str 함수로 결과를 보면, 모든 변수가 수치형 변수로 모델이 작동할 수 있도록 셋팅되었다.
+
+```{r fig.align='center'}
+train %>% 
+  cor(use = 'complete.obs') %>% 
+  corrplot(method = 'square')
+```
+
+또한 모든 변수들이 수치형이므로 상관계수에 대해 플랏을 그려보면, 우리의 Target 변수인 box_off_num과 다른 변수들 사이에 관계를 볼 수 있다.
+
+가장 영향도가 높은 것은 distributor_rank이고, 스텝의 수나, 상영시간, 감독의 과거 영화에 대한 평균 관람객 수 등이 상관관계가 높은 것으로 나온다.
+
+이렇게 구축된 데이터로부터 이제 다양한 알고리즘을 통해서 모델링을 수행해보도록 한다.
+
+## 1. Decision Tree 모델을 활용하여 관객 수 예측
+```{r}
+train_col <- colnames(train)
+train[train_col] <- sapply(train[train_col], as.numeric)
+test_col <- colnames(test)[-1]
+test[test_col] <- sapply(test[test_col], as.numeric)
+
+DT_regressor <- ctree(box_off_num ~ ., data = train)
+plot(DT_regressor)
+
+submission <- test %>% 
+  mutate(box_off_num = exp(predict(DT_regressor, test[, c(-1)]))) %>% 
+  select(title, box_off_num)
+
+submission$box_off_num <- as.integer(submission$box_off_num)
+# write.csv(submission, '/Users/paul/Desktop/submission.csv', 
+#           fileEncoding = 'utf-8', row.names = FALSE)
+head(submission)
+```
+
+전처리가 완료된 데이터에 대하여 관객 수를 예측하는 모델을 Decision Tree 알고리즘으로 만들어본다.
+
+일반적으로 트리 모델은 party 패키지 안에 tree, rpart, ctree 함수를 사용하고, 각각에 대한 특징은 다음과 같다.
+
+- tree 함수: Binary Recursive Partitioning 방법을 사용하고, 불순도를 엔트로피 지수로 사용한다. 엔트로피는 0부터 1 사이의 값을 가지고, 1에 가까울수록 혼잡도가 높은 즉, 예측의 정확도가 낮은 상태이다. 따라서 엔트로피가 낮은 상태가 되도록 나무의 모양을 생성한다.
+- rpart 함수: CART 방법을 사용하는 것으로, 전체 데이터에 대해 반복해서 두 개의 자식 노드를 생성하기 위해 모든 예측 변수를 사용한다. 이 때는 Gini-index가 작아지는 방향으로 움직이도록 모델을 생성한다.
+- ctree 함수: Unbiased Recursive Partitioning Based on Permutation 방법을 사용하여 p-test를 거친 significnace를 기준으로 가지치기를 할 변수를 결정하여 biased 될 위험이 낮고, 별도로 Pruning을 할 필요가 없다. 하지만 입력 변수의 레벨이 31개까지로 제한되어 있는 특징이 있다.
+
+![](DT.png)
+
+이를 통해 데이콘 홈페이지에서 결과를 확인해보도록 한다.
+
+그 결과는 **553,633 정도로 41등** 정도로 랭크된 것을 확인했다. 다음은 Bagging 알고리즘을 활용해보도록 한다.
+
+## 2. Bagging 모델을 활용하여 관객 수 예측
+```{r}
+output_df <- data_frame()
+for (num in seq(10, 50, 10)){
+  for (method in c('cv', 'repeatedcv')){
+    control <- trainControl(method = method, number = num)
+    output <- train(box_off_num ~ ., data = train, method = 'treebag', trControl = control)
+    output$result$num <- num
+    output$result$method <- method
+    output_df <- rbind(output_df, output$result)
+  }
+}
+
+target <- output_df %>% arrange(RMSE) %>% filter(row_number() == 1)
+control <- trainControl(method = target$method, number = target$num)
+Bag_regressor <- train(box_off_num ~ ., data = train, method = 'treebag', trControl = control)
+
+submission <- test %>% 
+  mutate(box_off_num = exp(predict(Bag_regressor, test[, c(-1)]))) %>% 
+  select(title, box_off_num)
+
+submission$box_off_num <- as.integer(submission$box_off_num)
+# write.csv(submission, '/Users/paul/Desktop/submission.csv', 
+#           fileEncoding = 'utf-8', row.names = FALSE)
+head(submission)
+```
+
+두번째로는 Bagging 알고리즘을 활용하여 관객 수를 예측해보도록 한다.
+
+adabag 패키지의 bagging 함수와 caret 패키지의 train 함수에서 method를 'treebag'로 활용하여 Bagging 모델을 만들 수 있다.
+
+먼저 trainControl 함수에서 교차검증 및 반복교차검증 방법으로 number의 개수를 수정하면서 RSME이 가장 최저가 되는 모델 파라미터를 확인한다.
+
+그리고 나서는 해당 모델로 최종 Bagging 모델을 만들어서 데이콘에서 test 데이터에 대한 결과를 확인한다.
+
+![](Bagging.png)
+
+이를 통해 데이콘 홈페이지에서 결과를 확인해보도록 한다. 그 결과는 **553,063 정도로 35등** 정도로 랭크된 것을 확인했다. 
+
+앞선 Decision Tree 보다는 소폭 결과가 상승한 것을 확인할 수 있다. 다음은 Random Forest 알고리즘이다.
+
+## 3. Random Forest 모델을 활용하여 관객 수 예측
+```{r fig.align='center'}
+control <- trainControl(method = 'cv', search = 'grid', number = 10)
+RF_regressor <- train(box_off_num ~ ., data = train, method = 'rf', trControl = control)
+
+importance <- varImp(RF_regressor, scale=FALSE)
+plot(importance)
+
+submission <- test %>% 
+  mutate(box_off_num = exp(predict(RF_regressor, test[, c(-1)]))) %>% 
+  select(title, box_off_num)
+
+submission$box_off_num <- as.integer(submission$box_off_num)
+# write.csv(submission, '/Users/paul/Desktop/submission.csv', 
+#           fileEncoding = 'utf-8', row.names = FALSE)
+head(submission)
+```
+
+이번에는 Random Forest 모델을 활용하여 관객의 수를 예측해보도록 한다.
+
+위와 동일하게 caret 패키지에서 method를 'rf'로 바꿔서 Random Forest에 대한 결과를 확인해보도록 한다.
+
+K-Fold 교차검증을 활용하여 모델을 만들어보고자 한다.
+
+K-Fold 교차검증은 train 데이터를 K개로 나누고, K-1개 데이터셋으로 학습하여 나머지 1개 데이터셋에 평가하는 과정을 K번 반복하여 수행한다.
+
+그리고 K개의 모델이 만들고, 각 모델의 MSE 값의 평균으로 해당 모델의 MSE를 결정한다.
+
+보통 5-Fold나 10-Fold를 많이 사용하는데, 두 개 모두 해보았더니 K를 10으로 하는 것이 결과가 더 좋았다.
+
+이렇게 만들어진 모델에 대하여 feature importance 즉, 변수의 중요도도 확인해본다.
+
+varImp 함수를 통해서 Random Forest 모델에서의 Importance를 출력하면 위와 같음을 확인할 수 있다.
+
+변수 중요도는 말 그대로 종속 변수를 예측하는데 사용되는 각각의 독립 변수들이 얼마나 중요한지를 확인하는 지표이다.
+
+일반적으로 Random Forest는 지니 평균 감소량으로 변수 중요도를 판단하는데, 이는 불순도를 가장 많이 감소시켜주는 독립변수를 활용하기 때문이다.
+
+따라서 변수 중요도를 통해서 각 독립 변수들의 상대적인 중요도를 한번에 확인할 수 있다.
+
+이 결과를 통해서 보면, 위에서 확인했던 상관계수 결과와 거의 유사하게 나오는 것을 알 수 있다.
+
+distributor_rank, num_staff, time 등의 변수가 예측에 긍정적인 영향을 미치고 있으며, 관람객 등급 변수들은 크게 의미가 없는 것을 알 수 있다.
+
+![](RF.png)
+
+최종적으로 데이콘 홈페이지에서 해당 모델의 결과를 확인해보도록 한다. 그 결과는 **473,867 정도로 2등** 정도로 랭크된 것을 확인했다. 
+
+앞선 Decision Tree와 Bagging 보다는 결과가 많이 상승한 것을 확인할 수 있다. 다음은 마지막인 XGBoost 알고리즘이다.
+
+## 4. XGBoost 모델을 활용하여 관객 수 예측
+
+일반적으로 XGBoost 알고리즘은 아래와 같이 3가지의 주요한 파라미터가 있다.
+
+1. 도구의 모양을 결정하는 일반 파라미터(General Parameter)
+    - booster: 어떤 부스터 구조를 사용할지 결정 -> gbtree, gblinear, dart
+    - nthread: 몇 개의 쓰레드를 동시에 처리할지 결정 -> default는 가능한 많이
+    - num_feature: feature 차원의 숫자를 정해야 하는 경우 옵션 셋팅 -> default는 가능한 많이
+2. 트리마다 가지치는 용도로 활용되는 부스터 파라미터(Booster Parameter)
+    - eta: Learning rate로 매 부스팅 스탭마다 weight를 주어 부스팅 과정에서 과적합이 되지 않도록 한다.
+    - gamma: 이 값이 커지면, 트리의 깊이가 줄어들어서 보수적인 모델이 된다. default는 0이다.
+    - max_depth: 한 트리의 maximum depth로, 숫자를 키울수록 모델이 복잡해져서 과적합 우려가 있다.
+    - lambda(L2 정규화): L2 Regularization에 붙는 weights이고, 숫자가 커질수록 보수적인 모델이 된다.
+    - alpha(L1 정규화): L1 Regularization에 붙는 weights이고, 숫자가 클수록 보수적인 모델이 된다.
+3. 최적화 퍼포먼스를 위한 학습 과정 파라미터(Learning Task Parameter)
+    - objective: 목적 함수로, linear-regression, binary-logistic classification, poison regression 등 다양하다.
+    - eval_metric: 모델의 평가 함수를 조정하는 함수로 RMSE, logloss, map 등이 있다.
+
+```{r}
+grid <- expand.grid(nrounds = 10000, 
+                    eta = seq(0.01, 0.3, 0.05), 
+                    max_depth = seq(1:8), 
+                    gamma = seq(0, 5, 1), 
+                    colsample_bytree = 1, 
+                    min_child_weight = 1, 
+                    subsample = 1)
+
+control <- trainControl(method = "cv", search = 'grid', number = 10)
+xgb_regressor <- train(box_off_num ~ ., data = train,
+                       trControl = control, tuneGrid = grid, method = 'xgbTree')
+
+submission <- test %>% 
+  mutate(box_off_num = exp(predict(xgb_regressor, test[, c(-1)]))) %>% 
+  select(title, box_off_num)
+
+submission$box_off_num <- as.integer(submission$box_off_num)
+# write.csv(submission, '/Users/paul/Desktop/submission.csv', 
+#           fileEncoding = 'utf-8', row.names = FALSE)
+head(submission)
+```
+
+위에서 이야기 했던 것처럼 XGBoost는 셋팅해야 하는 parameter가 상당히 많다.
+
+따라서 이를 여러가지 케이스로 확인하기 위하여 Grid Search를 수행해보도록 한다.
+
+Grid Search 방법은 탐색할 변수들의 조합을 만들어서 이들을 모델에 적용하면서 가장 최적의 파라미터를 찾는 방법이다.
+
+그래서 eta, max_depth, gamma 등에 대한 변수들을 몇 가지 케이스로 나눠서 변수를 셋팅해주었다.
+
+그 후에는 Random Forest와 동일하게 trainControl을 주고, xgbTree 즉, XGBoost 알고리즘의 결과를 확인한다.
+
+이를 통해 나온 최종 결과는 아래와 같음을 확인할 수 있다.
+
+![](XGBoost.png)
+
+최종적으로 데이콘 홈페이지에서 XGBoost 모델의 결과를 확인해보았고, **497,784**가 나오는 것을 확인할 수 있었다.
+
+비록 앞선 Random Forest 보다는 조금 감소한 성능이긴 하지만, 그래도 상위권에 소속되는 것을 확인할 수 있었다.

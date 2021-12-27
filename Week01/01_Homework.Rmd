@@ -1,0 +1,339 @@
+---
+title: "Practice1 - Data Manipulation (Team 1)"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, out.width="100%")
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(ggplot2)
+```
+
+### Loading data
+```{r}
+owid <- 
+  read.csv('http://github.com/owid/covid-19-data/raw/master/public/data/owid-covid-data.csv', stringsAsFactors=F)
+
+dim(owid)
+head(names(owid))
+```
+
+### 1. Column selection
+```{r}
+owid_selected <- 
+  owid %>% select(iso_code, continent, location, date, new_cases, new_deaths, new_cases_per_million,
+                  new_deaths_per_million, reproduction_rate, icu_patients, icu_patients_per_million,
+                  hosp_patients, hosp_patients_per_million, weekly_icu_admissions,
+                  weekly_icu_admissions_per_million, weekly_hosp_admissions,
+                  weekly_hosp_admissions_per_million, new_tests, new_tests_per_thousand, positive_rate,
+                  total_vaccinations, people_vaccinated, people_fully_vaccinated, new_vaccinations,
+                  people_vaccinated_per_hundred, people_fully_vaccinated_per_hundred, stringency_index,
+                  population, population_density, median_age, aged_65_older, aged_70_older, gdp_per_capita,
+                  extreme_poverty, cardiovasc_death_rate, diabetes_prevalence, female_smokers,
+                  male_smokers, handwashing_facilities, hospital_beds_per_thousand, life_expectancy,
+                  human_development_index, excess_mortality)
+
+dim(owid_selected)
+names(owid_selected)
+```
+
+주어진 조건에 따라서 기존의 owid 데이터프레임에서 일부 Columns만 추출하도록 한다.
+
+### 2. Excluding non-country location
+```{r}
+owid_countries <- 
+  owid_selected %>% 
+    filter(!location %in% c('Africa', 'Asia', 'Europe', 'European Union', 
+                            'International', 'North America', 'Oceania', 
+                            'South America', 'World'))
+
+dim(owid_countries)
+length(unique(owid_countries$location))
+```
+
+owid_selected 데이터프레임에서 location 열에 있는 값들 중, 나라의 이름이 아닌 대륙 등의 이름을 가지고 있는 것들을 제거해준다. 
+
+location의 개수와 실제 값 30개만 확인해보도록 한다.
+
+### 3. Changing column names
+```{r}
+colnames(owid_countries) <- gsub('^new_', 'daily_', colnames(owid_countries))
+
+owid_countries %>% 
+  select(starts_with('daily_')) %>% 
+  head()
+```
+
+owid_countries 데이터프레임의 열들 중에서 'new'로 시작하는 열들의 이름을 'daily'로 시작하게 바꾸도록 한다.
+
+### 4. Change type of column
+```{r}
+owid_countries$date <- as.Date(owid_countries$date)
+str(owid_countries)
+```
+
+owid_countries 데이터프레임의 date 열의 type을 Date 타입으로 바꾸고, str 함수를 통해서 잘 바뀌었는지 확인한다.
+
+### 5. Proportion of COVID-19 contracted people
+```{r}
+owid_countries <- 
+  owid_countries %>% 
+    group_by(location) %>% 
+    mutate(cumulative_cases = cumsum(replace_na(daily_cases, 0)), 
+           prop_contr_people_column = cumulative_cases / population)
+
+owid_countries %>% 
+  select(location, daily_cases, cumulative_cases, prop_contr_people_column) %>% 
+  head(20)
+```
+
+owid_countries 데이터프레임에서 누적 확진자의 전체 인구 대비 비율을 계산하도록 한다. 
+
+그런데 확인해보니, 누적 확진자에 대한 데이터가 없기 때문에 cumsum 함수를 통해서 누적 확진자 데이터를 만들어주도록 한다.
+
+이때, cumsum 함수는 NA를 자동으로 처리해주지 못하기 때문에 replace_na 함수를 통해서 NA는 0으로 바꾸고, 계산해주도록 한다.
+
+그 후, 문제에 따라서 cumulative_cases에 population을 나눠서 누적 확진자의 전체 인구 대비 비율을 계산하도록 한다.
+
+```{r}
+owid_countries %>% 
+  filter(date == max(owid_countries$date)) %>% 
+  arrange(desc(prop_contr_people_column)) %>% 
+  select(location, date, cumulative_cases, population, prop_contr_people_column) %>% 
+  head(8)
+```
+
+누적 확진자의 전체 인구 대비 비율을 계산한 후, 가장 최근 날짜 기준으로 데이터를 filter 하도록 한다. 그리고 가장 상위 5개 나라와 그 결과를 출력한다.
+
+상위 5개 나라는 Seychelles, Andorra, Montenegro, San Marion, Czechia로 나오는 것을 확인할 수 있다.
+
+```{r}
+owid_countries %>% 
+  filter(date == max(owid_countries$date)) %>% 
+  arrange(desc(prop_contr_people_column)) %>% 
+  select(location, date, cumulative_cases, population, prop_contr_people_column) %>% 
+  filter(prop_contr_people_column == 0)
+```
+
+하위 5개 나라와 그 결과를 출력한다. (전체 인구 대비 감염된 percentage가 낮은 나라들)
+
+하위 5개 나라는 확진자 비율이 0인 국가들인데, 이런 국가가 총 8개가 있다.
+
+그 국가들은 Aruba, Cayman Islands, Curacao, Faeroe Islands, Greenland, Guernsey, Isle of Man, Macao 이다.
+
+### 6. 백신 접종 격차에 대해
+```{r}
+vaccinations_gdp <- 
+  owid_countries %>% 
+  group_by(location) %>% 
+  fill(people_vaccinated, .direction = c('down')) %>% 
+  filter(date == max(owid_countries$date)) %>% 
+  mutate(people_vaccinated = ifelse(is.na(people_vaccinated), 0, people_vaccinated),
+         v_rate = people_vaccinated / population, 
+         v_rate_group = cut(v_rate, breaks = c(-Inf, 0.1, 0.5, Inf), 
+                            labels = c('under_10%', '10%~50%', 'over_50%')))
+
+vaccinations_gdp %>% 
+  group_by(v_rate_group) %>% 
+  summarise(GDP_mean = mean(na.omit(gdp_per_capita))) %>% 
+  arrange(desc(GDP_mean))
+```
+
+백신 접종률을 계산하기 위해 누적 백신 접종자 수를 계산하도록 한다.
+
+백신 접종은 한 번이라도 맞은 사람(people_vaccinated)과 1차와 2차 접종을 모두 한 사람(people_fully_vaccinated)으로 나뉜다.
+
+여기서 백신 보급의 양극화에 대해 알아보려고 하기 때문에 한 번이라도 맞은 사람의 비율을 계산해본다.
+
+이를 위해서 people_vaccinated 데이터에는 NA가 많이 있기 때문에 time series 기준으로 전날의 값들로 NA를 채워주도록 한다. (fill(.direction = c('down')))
+
+그리고 people_vaccinated를 population으로 나눠서 백신 접종률(v_rate)을 구하고, cut 함수로 그룹을 나눠주도록 한다.
+
+최종적으로는 각 그룹 별로의 GDP의 평균 값을 계산한다.
+
+```{r}
+vaccinations_gdp %>% 
+  select(location, gdp_per_capita, v_rate, v_rate_group) %>% 
+  ggplot(mapping = aes(x = v_rate_group, y = gdp_per_capita)) +
+  geom_boxplot(alpha = 0.1, aes(col = v_rate_group, fill = v_rate_group)) +
+  geom_jitter(alpha = 0.3, aes(col = v_rate_group)) +
+  coord_flip()
+```
+
+이를 boxplot으로 표현해보면, 조금 더 직관적으로 확인할 수 있다.
+
+위에서 출력한 평균값과 일치하게, 백신 접종률이 높은 국가들이 전반적으로 GDP가 높은 것을 볼 수 있다.
+
+```{r}
+v_df <- vaccinations_gdp %>% 
+          select(location, gdp_per_capita, v_rate, v_rate_group)
+
+plot(v_rate ~ gdp_per_capita, data = v_df)
+abline(lm(v_rate ~ gdp_per_capita, data = v_df), col = 'red')
+```
+
+조금 더 자세히 확인해보기 위하여 X축을 GDP로, Y축을 백신 접종률로 하여 plot과 회귀선을 그려본다.
+
+그 결과 y=x 형태의 일차식 그래프가 나오는 것을 확인할 수 있으며, GDP가 커질수록 백신 접종률이 높아진다.
+
+```{r}
+ggplot(vaccinations_gdp, aes(x = location)) +
+  geom_col(aes(x = reorder(location, -gdp_per_capita), y = gdp_per_capita, fill = 'redfill')) +
+  geom_line(aes(y = v_rate*100000, group = 1, color = 'blackline')) +
+  scale_y_continuous(sec.axis = sec_axis(trans = ~ . / 100000)) +
+  scale_fill_manual('', labels = 'GDP', values = "#C00000") +
+  scale_color_manual('', labels = 'vaccine_rate', values = 'black') +
+  theme(axis.text.x = element_blank())
+```
+
+국가 경제 수준에 따라 백신 보급의 편차가 심한지를 알아보기 위해서 백신 접종률과 GDP를 그래프로 표현하여 그 분포를 확인해보도록 한다.
+
+X축은 각 나라가, Y축에서 막대는 GDP를, 선은 백신 접종률을 의미한다.
+
+그 결과를 보면, GDP가 높다고 해서 무조건 백신 접종률이 높은 것으로 보이지는 않는다.
+
+다만, GDP가 낮은 국가의 백신 접종률은 다른 나라들에 비해 현저히 떨어지는 것은 확인된다.
+
+또한 백신 접종률에 따른 그룹 별로 GDP의 평균 값에서 볼 수 있듯, 어느 정도는 GDP와 백신 접종률 사이의 관계가 있는 것으로 판단된다.
+
+### 7. Continent comparison
+```{r}
+v_gap_stat <- 
+  vaccinations_gdp %>% 
+    group_by(continent) %>% 
+    summarise(population_sum = sum(population), 
+              population_density_mean = mean(population_density, na.rm = T), 
+              cumulative_cases_mean = mean(cumulative_cases, na.rm = T),
+              gdp_mean = mean(gdp_per_capita, na.rm = T), 
+              v_rate_mean = mean(v_rate, na.rm = T),
+              median_age_mean = mean(median_age, na.rm = T), 
+              life_expectancy_mean = mean(life_expectancy, na.rm = T), 
+              develop_index_mean = mean(human_development_index, na.rm = T)) %>% 
+    arrange(population_sum)
+
+v_gap_stat
+```
+
+대륙 별로 총 인구 수, 평균 인구 밀도, GDP의 평균, median age의 평균, 기대수명률의 평균, development_index의 평균 등의 지표를 비교해본다.
+
+또한 대륙 별로의 누적 확진자 평균과 백신 접종률의 평균을 계산해본다.
+
+#### 7-1. 대륙 별 인구 수
+```{r}
+print_plot <- function(variable, title){
+  v_gap_stat %>% 
+    ggplot(aes(x = reorder(continent, variable), y = variable)) +
+    theme_bw() + geom_col() + xlab("continent") +
+    ggtitle(title) + 
+    theme(plot.title = element_text(hjust=0.5))
+}
+
+print_plot(v_gap_stat$population_sum, 'population_sum')
+```
+
+각 대륙 별로 원하는 변수의 전반적인 분포를 확인할 수 있는 print_plot 이라는 함수를 정의한다.
+
+그리고 가장 처음으로는, 대륙 별로의 인구 수를 확인하는 그래프를 그려보았다.
+
+이 그래프를 통해서 알 수 있는 것은 Asia - Africa - Europe .. 순으로 인구 수가 많다.
+
+#### 7-2. 대륙 별 평균 인구 밀도
+```{r}
+print_plot(v_gap_stat$population_density_mean, 'population_density_mean')
+```
+
+두번째로는, 대륙 별로 평균 인구 밀도를 알아본다.
+
+그래프를 통해서 인구 수가 가장 많았던 Asia가 평균 인구 밀도가 가장 높은 것을 볼 수 있다.
+
+#### 7-3. 대륙 별 평균 GDP
+```{r}
+print_plot(v_gap_stat$gdp_mean, 'gdp_mean')
+```
+
+세번째로는, 대륙 별로 평균 GDP를 알아본다.
+
+그래프를 통해서 GDP가 가장 높았던 대륙은 Europe이고, Africa가 가장 GDP가 낮았다.
+
+#### 7-4. 대륙 별 평균 Median age
+```{r}
+print_plot(v_gap_stat$median_age_mean, 'median_age_mean')
+```
+
+네번째로는, 대륙 별로 평균 Median age를 알아본다.
+
+그래프를 통해서 중위 나이가 가장 높고, 낮은 대륙은 GDP와 동일하게 Europe과 Africa 였다.
+
+#### 7-5. 기타
+```{r}
+print_plot(v_gap_stat$cumulative_cases_mean, 'cumulative_cases_mean')
+print_plot(v_gap_stat$v_rate_mean, 'v_rate_mean')
+print_plot(v_gap_stat$life_expectancy_mean, 'life_expectancy_mean')
+print_plot(v_gap_stat$develop_index_mean, 'develop_index_mean')
+```
+
+기타 분포를 확인하기 위해서 누적 확진자 수, 평균 접종률, 평균 기대수명, develop_index 값을 확인했다.
+
+위와 같은 과정들을 통해서 전반적으로 알 수 있었던 것은 다음과 같다.
+
+1. 인구 수가 가장 많고, 평균 인구 밀도가 가장 높은 아시아는 생각 보다 누적 확진자 수가 많지 않다.
+
+2. 평균 인구 밀도가 가장 낮았던 South America가 오히려 누적 확진자 수가 가장 많았다.
+
+3. GDP의 평균이 가장 높았던 Europe이 평균 백신 접종률이 가장 높았다.
+
+4. GDP의 평균이 가장 낮았던 Africa의 평균 백신 접종률이 가장 낮았다.
+
+### 8. Stringency_index vs. Reproduction_rate
+```{r}
+df <- owid_countries %>% 
+        filter(reproduction_rate >= 0) %>% 
+        select(location, date, stringency_index, reproduction_rate) %>% 
+        drop_na()
+
+head(df)
+```
+
+stringency_index와 reproduction_rate을 통해서 높은 수준의 사회적 통제가 전염병 확산 속도에 영향을 주는지 확인보도록 한다.
+
+이를 확인하기 위해 데이터를 먼저 추렸는데, 확인해보니 reproduction_rate에 -0.01이라는 값이 4개가 있는 것을 보았다.
+
+reproduction_rate 변수는 한 명의 확진자가 추가로 얼마나 확진시키는지에 대한 것이므로 이를 Outlier로 생각하여 제거했다.
+
+```{r}
+cor(df$stringency_index, df$reproduction_rate)
+```
+
+이를 통해 먼저 stringency_index와 reproduction_rate 간의 상관계수를 확인해보면, 0.1525 정도의 값이 나온다.
+
+이에 대한 해석은 한 변수의 값이 커질 때, 다른 변수의 값도 약간은 커지는 약한 양적 선형관계를 뜻한다.
+
+```{r}
+plot(reproduction_rate ~ stringency_index, data = df)
+abline(lm(reproduction_rate ~ stringency_index, data = df), col = 'red')
+```
+
+이를 조금 더 직관적으로 확인해보기 위하여 산점도를 그리고, 그에 따른 회귀 그래프를 그려보았다.
+
+X축이 stringency_index이고, Y축이 reproduction_rate인데 기울기가 작기는 하지만 X축이 커질수록, 미세하게 나마 Y축의 값이 커지는 모습을 보인다.
+
+따라서 상관계수의 해석과 그래프를 통해서 볼 때, 높은 수준의 사회적 통제는 전염병의 확산 속도를 줄이는데 큰 영향을 미치지 않는 것으로 사료된다.
+
+```{r}
+df %>% 
+  mutate(stringency_index_group = cut(stringency_index, breaks = c(-Inf, seq(10, 90, 10), Inf), 
+                                      labels = c('0~10', '10~20', '20~30', '30~40', '40~50', 
+                                                 '50~60', '60~70', '70~80', '80~90', '90~100'))) %>%
+  group_by(stringency_index_group) %>% 
+  summarise(mean(reproduction_rate))
+```
+
+이를 조금 더 자세히 확인해보기 위해서 0부터 100까지 값으로 나뉜 사회통제 수준을 10 단위로 하여 group을 만든다.
+
+그리고 나뉜 각 그룹에 대하여 reproduction_rate의 평균을 계산해본다.
+
+그 결과를 보면, 위에서 이야기 했던 상관계수와 그래프의 모양처럼 사회통제 수준이 강해질수록 오히려 reproduction_rate의 평균이 증가함을 볼 수 있다.
+
+그래서 추측해보건데, 이미 코로나의 확산도가 심해졌기 때문에 뒤늦게나마 사회통제 수준을 올리게 되어 이런 결과가 나오지 않았을까 생각해보았다.
