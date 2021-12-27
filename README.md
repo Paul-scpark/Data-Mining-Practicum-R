@@ -20,7 +20,7 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 |Week10|Linear regression|[Practice8](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week10/10_Homework.html)|
 |Week11|Logistic regression|[Practice9](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week11/11_Homework.html)|
 |Week12|Multiclass classification and regularization|[Practice10](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week12/12_Homework.html)|
-|Week13, 14, 15|Neural network model|[Practice11](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week13/13_Homework.html)|
+|Week13, 14, 15|Neural network model|[Practice11](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week13%2C%2014%2C%2015/13_Homework.html)|
 |Week16|Final Exam|-|
 
 
