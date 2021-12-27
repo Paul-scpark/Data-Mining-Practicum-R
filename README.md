@@ -2,7 +2,7 @@
 Repository for Homework Assignment of Data Mining Practicum(SIT32007) <br/>
 Handong University, 2021 Fall, Prof. Hyebong Choi
 
-<img src="https://img.shields.io/badge/R-green?style=flat&logo=R&logoColor=276DC3"/> <img src="https://img.shields.io/badge/Excel-yellow?style=flat&logo=Microsoft Excel&logoColor=217346"/> <img src="https://img.shields.io/badge/Plotly-pink?style=flat&logo=Plotly&logoColor=3F4F75"/>
+<img src="https://img.shields.io/badge/R-green?style=flat&logo=R&logoColor=276DC3"/> <img src="https://img.shields.io/badge/RStudio-yellowgreen?style=flat&logo=RStudio&logoColor=75AADB"/> <img src="https://img.shields.io/badge/Excel-yellow?style=flat&logo=Microsoft Excel&logoColor=217346"/> <img src="https://img.shields.io/badge/Plotly-pink?style=flat&logo=Plotly&logoColor=3F4F75"/>
 
 ## Table of content (Summary)
 
