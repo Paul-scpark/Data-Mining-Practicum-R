@@ -6,9 +6,9 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 
 ## Table of content (Summary)
 
-|Week|Description|설명|
+|Week|Description|Homework|
 |:---:|:---:|:---:|
-|Week1|Data transformation with dplyr|중앙정렬|
+|Week1|Data transformation with dplyr|[Practice1](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week01/01_HW_Practice.pdf)|
 |Week2|Data integration with dplyr|중앙정렬|
 |Week3|Data visualization|중앙정렬|
 |Week4|Text mining|중앙정렬|
