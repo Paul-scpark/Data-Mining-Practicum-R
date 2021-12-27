@@ -5,7 +5,9 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 <img src="https://img.shields.io/badge/R-green?style=flat&logo=R&logoColor=276DC3"/>
 
 ## Table of content (Summary)
-
+|Week|Description|설명|
+|:---:|:---:|:---:|
+|Week1|Data transformation|중앙정렬|
 
 
 ## Table of content (Detail)
