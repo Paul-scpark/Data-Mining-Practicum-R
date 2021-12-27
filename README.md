@@ -1,4 +1,4 @@
-# Data_Mining_Practicum_R
+# Data Mining Practicum using R
 R-based data mining (Handong University, 2021-2, Data Mining Practicum(SIT32007), Prof. Hyebong choi)
 
 
