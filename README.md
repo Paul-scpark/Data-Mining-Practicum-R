@@ -12,9 +12,9 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 |Week2|Data integration with dplyr|[Practice2](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week02/02_Homework.html)|
 |Week3|Data visualization|[Practice3](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week03/03_Homework.html)|
 |Week4|Text mining|[Practice4](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week04/04_Homework.html)|
-|Week5|Text mining|[Practice5](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week05/05_Homework.html)|
-|Week6|Clustering|중앙정렬|
-|Week7|Recommender system|중앙정렬|
+|Week5|Text mining|[Practice5](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week05/05_Homework_Team1.pdf)|
+|Week6|Clustering|[Practice6](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week06/06_Homework.html)|
+|Week7|Recommender system|-|
 |Week8|Midterm Exam|중앙정렬|
 |Week9|Ensemble algorithm|중앙정렬|
 |Week10|Linear regression|중앙정렬|
