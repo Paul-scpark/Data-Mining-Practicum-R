@@ -1,5 +1,5 @@
 # Data_Mining_Practicum_R
-R-based data mining (HGU, SIT32007, 2021-2, Prof. Hyebong choi)
+R-based data mining (Handong University, 2021-2, Data Mining Practicum(SIT32007), Prof. Hyebong choi)
 
 
 <img src="https://img.shields.io/badge/R-green?style=flat&logo=R&logoColor=276DC3"/>
