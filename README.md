@@ -80,3 +80,7 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 
 #### Week16 - Final Exam
 - Test of Machine Learning and Deep Learning Theory
+
+## Contact
+
+:email: solver.paul@gmail.com
