@@ -4,8 +4,12 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 
 <img src="https://img.shields.io/badge/R-green?style=flat&logo=R&logoColor=276DC3"/>
 
-## table
+## Table of content (Summary)
 
-/--
 
-## Detail
+
+## Table of content (Detail)
+
+#### Week1 - Data transformation with dplyr
+- package: dplyr, stringr, tidyr
+- Preprocessing, Manipulation
