@@ -5,9 +5,23 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 <img src="https://img.shields.io/badge/R-green?style=flat&logo=R&logoColor=276DC3"/>
 
 ## Table of content (Summary)
+
 |Week|Description|설명|
 |:---:|:---:|:---:|
-|Week1|Data transformation|중앙정렬|
+|Week1|Data transformation with dplyr|중앙정렬|
+|Week2|Data integration with dplyr|중앙정렬|
+|Week3|Data visualization|중앙정렬|
+|Week4|Text mining|중앙정렬|
+|Week5|Text mining|중앙정렬|
+|Week6|Clustering|중앙정렬|
+|Week7|Recommender system|중앙정렬|
+|Week8|Midterm Exam|중앙정렬|
+|Week9|Ensemble algorithm|중앙정렬|
+|Week10|Linear regression|중앙정렬|
+|Week11|Logistic regression|중앙정렬|
+|Week12|Multiclass classification and regularization|중앙정렬|
+|Week13, 14, 15|Neural network model|중앙정렬|
+|Week16|Final Exam|중앙정렬|
 
 
 ## Table of content (Detail)
