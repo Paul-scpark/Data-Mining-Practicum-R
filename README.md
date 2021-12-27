@@ -15,10 +15,10 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 |Week5|Text mining|[Practice5](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week05/05_Homework_Team1.pdf)|
 |Week6|Clustering|[Practice6](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week06/06_Homework.html)|
 |Week7|Recommender system|-|
-|Week8|Midterm Exam|중앙정렬|
-|Week9|Ensemble algorithm|중앙정렬|
-|Week10|Linear regression|중앙정렬|
-|Week11|Logistic regression|중앙정렬|
+|Week8|Midterm Exam|[Midterm Exam](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week08_Midterm/08_Midterm.pdf)|
+|Week9|Ensemble algorithm|[Practice7](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week09/09_Homework.html)|
+|Week10|Linear regression|[Practice8](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week10/10_Homework.html)|
+|Week11|Logistic regression|[Practice9](https://github.com/Paul-scpark/Data_Mining_Practicum_R/blob/main/Week11/11_Homework.html)|
 |Week12|Multiclass classification and regularization|중앙정렬|
 |Week13, 14, 15|Neural network model|중앙정렬|
 |Week16|Final Exam|중앙정렬|
