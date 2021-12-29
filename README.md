@@ -49,6 +49,7 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 #### Week6 - Clustering
 - package: tidyverse, dbscan, cowplot, proxy
 - K-means, Ch index, Distance, DBSCAN
+- Implementation of K-means, DBSCAN Algorithm Code
 
 #### Week7 - Recommender system
 - package: tidyverse, recommenderlab
@@ -61,18 +62,22 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 #### Week9 - Ensemble algorithm
 - package: tidyverse, corrplot, caret, rpart, randomForest, xgboost, adabag
 - Dacon problem - Decision Tree, Bagging, Random Forest, XGBoost
+- Movie audience number prediction problem (Dacon)
 
 #### Week10 - Linear regression
 - package: tidyverse, ggplot2, Metrics
 - Linear Regression Algorithm
+- Implementation of Linear Regression Algorithm Code
 
 #### Week11 - Logistic regression
 - package: tidyverse, ggplot2, Metrics
 - Logistic Regression Algorithm
+- Implementation of Logistic Regression Algorithm Code
 
 #### Week12 - Multiclass classification and regularization
 - package: tidyverse, Metrics, caret, randomForest
 - Kaggle problem - Multiclass classification
+- Motion recognition prediction problem (Kaggle)
 
 #### Week13, 14, 15 - Neural network model
 - package: tidyverse, keras, tensorflow
@@ -82,5 +87,4 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 - Test of Machine Learning and Deep Learning Theory
 
 ## Contact
-
 :email: solver.paul@gmail.com
