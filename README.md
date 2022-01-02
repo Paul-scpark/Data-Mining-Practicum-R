@@ -63,7 +63,7 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 - package: tidyverse, corrplot, caret, rpart, randomForest, xgboost, adabag
 - Dacon problem - Decision Tree, Bagging, Random Forest, XGBoost
 - Movie audience number prediction problem (Dacon)
-- [Dacon problem link](https://dacon.io/competitions/official/235536/overview/description)
+- [Dacon problem link](https://www.kaggle.com/uciml/human-activity-recognition-with-smartphones)
 
 #### Week10 - Linear regression
 - package: tidyverse, ggplot2, Metrics
