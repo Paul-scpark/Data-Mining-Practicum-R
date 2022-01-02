@@ -63,7 +63,7 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 - package: tidyverse, corrplot, caret, rpart, randomForest, xgboost, adabag
 - Dacon problem - Decision Tree, Bagging, Random Forest, XGBoost
 - Movie audience number prediction problem (Dacon)
-- [Dacon problem link](https://www.kaggle.com/uciml/human-activity-recognition-with-smartphones)
+- [Dacon problem link](https://dacon.io/competitions/official/235536/overview/description)
 
 #### Week10 - Linear regression
 - package: tidyverse, ggplot2, Metrics
@@ -79,7 +79,7 @@ Handong University, 2021 Fall, Prof. Hyebong Choi
 - package: tidyverse, Metrics, caret, randomForest
 - Kaggle problem - Multiclass classification
 - Motion recognition prediction problem (Kaggle)
-- [Kaggle problem link](https://naver.com)
+- [Kaggle problem link](https://www.kaggle.com/uciml/human-activity-recognition-with-smartphones)
 
 #### Week13, 14, 15 - Neural network model
 - package: tidyverse, keras, tensorflow
